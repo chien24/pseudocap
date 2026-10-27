@@ -101,3 +101,5 @@ sentence-transformers 5.0.0, bert-score 0.3.13, pycocoevalcap 1.2, spacy 3.8.7 +
 Tốc độ, `CHECK` từng ô: chưa có. Ghi vào đây khi user gửi log.
 
 Commit: `f66a17f` (tools + metadata + notebook + nhật ký), sau đó `.gitattributes` (`* -text`, giữ nguyên byte để sha256 ở ô 1 khớp).
+
+2026-10-27 (sau): metadata không upload nữa: ô 1 clone/pull `github.com/chien24/pseudocap` (public) vào `/content/pseudocap`, đọc `metadata/` từ đó; protocol ghi thêm `pseudocap_commit`; `verify_protocol` kiểm sha256 metadata không đổi sau khi khóa. Commit `dcde5bb`.
