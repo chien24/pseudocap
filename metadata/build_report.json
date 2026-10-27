@@ -41,27 +41,7 @@
  "yc2_start_ge_end_or_zero_len": [],
  "hf_shards": {
   "tars": 113,
-  "in_manifest_json": 95,
-  "from_done_json": [
-   "videos/htstep_videos_4027.tar",
-   "videos/htstep_videos_4028.tar",
-   "videos/htstep_videos_4029.tar",
-   "videos/htstep_videos_4030.tar",
-   "videos/htstep_videos_4031.tar",
-   "videos/htstep_videos_4032.tar",
-   "videos/htstep_videos_4033.tar",
-   "videos/htstep_videos_4034.tar",
-   "videos/htstep_videos_4035.tar",
-   "videos/htstep_videos_4036.tar",
-   "videos/htstep_videos_4037.tar",
-   "videos/htstep_videos_4038.tar",
-   "videos/htstep_videos_4039.tar",
-   "videos/htstep_videos_4040.tar",
-   "videos/htstep_videos_4041.tar",
-   "videos/htstep_videos_4042.tar",
-   "videos/htstep_videos_4043.tar",
-   "videos/htstep_videos_4044.tar"
-  ]
+  "source": "metadata/tar_index.csv"
  },
  "hf_videos_total": 7453
 }

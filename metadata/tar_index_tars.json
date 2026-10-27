@@ -1,0 +1,457 @@
+{
+ "revision": "541f392c22573eec36ff677d9c93a4f4be829061",
+ "tars": {
+  "videos/htstep_videos_1000.tar": {
+   "size": 1789767680,
+   "n_members": 90
+  },
+  "videos/htstep_videos_1001.tar": {
+   "size": 1692846080,
+   "n_members": 86
+  },
+  "videos/htstep_videos_1002.tar": {
+   "size": 1723709440,
+   "n_members": 86
+  },
+  "videos/htstep_videos_1003.tar": {
+   "size": 1763102720,
+   "n_members": 78
+  },
+  "videos/htstep_videos_1004.tar": {
+   "size": 1597378560,
+   "n_members": 75
+  },
+  "videos/htstep_videos_1005.tar": {
+   "size": 1504419840,
+   "n_members": 71
+  },
+  "videos/htstep_videos_1006.tar": {
+   "size": 1562439680,
+   "n_members": 71
+  },
+  "videos/htstep_videos_1007.tar": {
+   "size": 1484820480,
+   "n_members": 81
+  },
+  "videos/htstep_videos_1008.tar": {
+   "size": 1430394880,
+   "n_members": 69
+  },
+  "videos/htstep_videos_1009.tar": {
+   "size": 1613875200,
+   "n_members": 80
+  },
+  "videos/htstep_videos_1010.tar": {
+   "size": 35174400,
+   "n_members": 2
+  },
+  "videos/htstep_videos_2000.tar": {
+   "size": 722821120,
+   "n_members": 35
+  },
+  "videos/htstep_videos_2001.tar": {
+   "size": 653137920,
+   "n_members": 31
+  },
+  "videos/htstep_videos_3000.tar": {
+   "size": 2386309120,
+   "n_members": 92
+  },
+  "videos/htstep_videos_3001.tar": {
+   "size": 2264750080,
+   "n_members": 86
+  },
+  "videos/htstep_videos_3002.tar": {
+   "size": 2321408000,
+   "n_members": 90
+  },
+  "videos/htstep_videos_3005.tar": {
+   "size": 2364323840,
+   "n_members": 90
+  },
+  "videos/htstep_videos_3007.tar": {
+   "size": 75233280,
+   "n_members": 3
+  },
+  "videos/htstep_videos_3009.tar": {
+   "size": 1961820160,
+   "n_members": 87
+  },
+  "videos/htstep_videos_3011.tar": {
+   "size": 126883840,
+   "n_members": 6
+  },
+  "videos/htstep_videos_3014.tar": {
+   "size": 71086080,
+   "n_members": 4
+  },
+  "videos/htstep_videos_3016.tar": {
+   "size": 19814400,
+   "n_members": 1
+  },
+  "videos/htstep_videos_3018.tar": {
+   "size": 29921280,
+   "n_members": 1
+  },
+  "videos/htstep_videos_3020.tar": {
+   "size": 58183680,
+   "n_members": 3
+  },
+  "videos/htstep_videos_3021.tar": {
+   "size": 2256384000,
+   "n_members": 87
+  },
+  "videos/htstep_videos_3023.tar": {
+   "size": 48076800,
+   "n_members": 2
+  },
+  "videos/htstep_videos_3025.tar": {
+   "size": 53463040,
+   "n_members": 2
+  },
+  "videos/htstep_videos_3028.tar": {
+   "size": 94320640,
+   "n_members": 5
+  },
+  "videos/htstep_videos_3030.tar": {
+   "size": 64737280,
+   "n_members": 4
+  },
+  "videos/htstep_videos_3033.tar": {
+   "size": 2029875200,
+   "n_members": 85
+  },
+  "videos/htstep_videos_3035.tar": {
+   "size": 745031680,
+   "n_members": 30
+  },
+  "videos/htstep_videos_3040.tar": {
+   "size": 1985792000,
+   "n_members": 84
+  },
+  "videos/htstep_videos_3042.tar": {
+   "size": 2009415680,
+   "n_members": 85
+  },
+  "videos/htstep_videos_3047.tar": {
+   "size": 2146713600,
+   "n_members": 86
+  },
+  "videos/htstep_videos_3049.tar": {
+   "size": 2079457280,
+   "n_members": 90
+  },
+  "videos/htstep_videos_3054.tar": {
+   "size": 61296640,
+   "n_members": 3
+  },
+  "videos/htstep_videos_3055.tar": {
+   "size": 2046269440,
+   "n_members": 80
+  },
+  "videos/htstep_videos_3056.tar": {
+   "size": 62289920,
+   "n_members": 3
+  },
+  "videos/htstep_videos_3057.tar": {
+   "size": 56258560,
+   "n_members": 2
+  },
+  "videos/htstep_videos_3058.tar": {
+   "size": 18862080,
+   "n_members": 2
+  },
+  "videos/htstep_videos_3059.tar": {
+   "size": 81264640,
+   "n_members": 2
+  },
+  "videos/htstep_videos_3060.tar": {
+   "size": 51896320,
+   "n_members": 2
+  },
+  "videos/htstep_videos_3061.tar": {
+   "size": 23388160,
+   "n_members": 1
+  },
+  "videos/htstep_videos_3062.tar": {
+   "size": 1933608960,
+   "n_members": 87
+  },
+  "videos/htstep_videos_3065.tar": {
+   "size": 93327360,
+   "n_members": 4
+  },
+  "videos/htstep_videos_3066.tar": {
+   "size": 1929297920,
+   "n_members": 87
+  },
+  "videos/htstep_videos_3067.tar": {
+   "size": 750489600,
+   "n_members": 32
+  },
+  "videos/htstep_videos_3072.tar": {
+   "size": 1960560640,
+   "n_members": 81
+  },
+  "videos/htstep_videos_3074.tar": {
+   "size": 2396661760,
+   "n_members": 86
+  },
+  "videos/htstep_videos_3080.tar": {
+   "size": 2329333760,
+   "n_members": 87
+  },
+  "videos/htstep_videos_3082.tar": {
+   "size": 2286223360,
+   "n_members": 92
+  },
+  "videos/htstep_videos_3083.tar": {
+   "size": 135434240,
+   "n_members": 3
+  },
+  "videos/htstep_videos_3084.tar": {
+   "size": 19404800,
+   "n_members": 2
+  },
+  "videos/htstep_videos_3085.tar": {
+   "size": 342609920,
+   "n_members": 15
+  },
+  "videos/htstep_videos_3086.tar": {
+   "size": 2030735360,
+   "n_members": 85
+  },
+  "videos/htstep_videos_3087.tar": {
+   "size": 832153600,
+   "n_members": 32
+  },
+  "videos/htstep_videos_3088.tar": {
+   "size": 1944668160,
+   "n_members": 86
+  },
+  "videos/htstep_videos_3089.tar": {
+   "size": 1590845440,
+   "n_members": 60
+  },
+  "videos/htstep_videos_3095.tar": {
+   "size": 2123141120,
+   "n_members": 88
+  },
+  "videos/htstep_videos_3097.tar": {
+   "size": 2342471680,
+   "n_members": 88
+  },
+  "videos/htstep_videos_3103.tar": {
+   "size": 2156288000,
+   "n_members": 92
+  },
+  "videos/htstep_videos_3104.tar": {
+   "size": 1950177280,
+   "n_members": 81
+  },
+  "videos/htstep_videos_3105.tar": {
+   "size": 1764833280,
+   "n_members": 78
+  },
+  "videos/htstep_videos_3106.tar": {
+   "size": 1914460160,
+   "n_members": 79
+  },
+  "videos/htstep_videos_3107.tar": {
+   "size": 1594388480,
+   "n_members": 71
+  },
+  "videos/htstep_videos_3108.tar": {
+   "size": 1404743680,
+   "n_members": 74
+  },
+  "videos/htstep_videos_3109.tar": {
+   "size": 1776087040,
+   "n_members": 82
+  },
+  "videos/htstep_videos_3110.tar": {
+   "size": 378603520,
+   "n_members": 16
+  },
+  "videos/htstep_videos_4000.tar": {
+   "size": 2368931840,
+   "n_members": 87
+  },
+  "videos/htstep_videos_4001.tar": {
+   "size": 2158151680,
+   "n_members": 83
+  },
+  "videos/htstep_videos_4002.tar": {
+   "size": 1865707520,
+   "n_members": 80
+  },
+  "videos/htstep_videos_4003.tar": {
+   "size": 1984296960,
+   "n_members": 92
+  },
+  "videos/htstep_videos_4004.tar": {
+   "size": 2216243200,
+   "n_members": 89
+  },
+  "videos/htstep_videos_4005.tar": {
+   "size": 2181713920,
+   "n_members": 92
+  },
+  "videos/htstep_videos_4006.tar": {
+   "size": 1891276800,
+   "n_members": 84
+  },
+  "videos/htstep_videos_4007.tar": {
+   "size": 1971415040,
+   "n_members": 82
+  },
+  "videos/htstep_videos_4008.tar": {
+   "size": 2198671360,
+   "n_members": 85
+  },
+  "videos/htstep_videos_4009.tar": {
+   "size": 1938933760,
+   "n_members": 88
+  },
+  "videos/htstep_videos_4010.tar": {
+   "size": 2052505600,
+   "n_members": 89
+  },
+  "videos/htstep_videos_4011.tar": {
+   "size": 2461736960,
+   "n_members": 90
+  },
+  "videos/htstep_videos_4012.tar": {
+   "size": 2395033600,
+   "n_members": 94
+  },
+  "videos/htstep_videos_4013.tar": {
+   "size": 2341836800,
+   "n_members": 88
+  },
+  "videos/htstep_videos_4014.tar": {
+   "size": 2200883200,
+   "n_members": 90
+  },
+  "videos/htstep_videos_4015.tar": {
+   "size": 1958717440,
+   "n_members": 84
+  },
+  "videos/htstep_videos_4016.tar": {
+   "size": 2125772800,
+   "n_members": 87
+  },
+  "videos/htstep_videos_4017.tar": {
+   "size": 2396620800,
+   "n_members": 90
+  },
+  "videos/htstep_videos_4018.tar": {
+   "size": 2032465920,
+   "n_members": 88
+  },
+  "videos/htstep_videos_4019.tar": {
+   "size": 2019082240,
+   "n_members": 86
+  },
+  "videos/htstep_videos_4020.tar": {
+   "size": 1982351360,
+   "n_members": 85
+  },
+  "videos/htstep_videos_4021.tar": {
+   "size": 2157854720,
+   "n_members": 88
+  },
+  "videos/htstep_videos_4022.tar": {
+   "size": 2288793600,
+   "n_members": 85
+  },
+  "videos/htstep_videos_4023.tar": {
+   "size": 2068080640,
+   "n_members": 83
+  },
+  "videos/htstep_videos_4024.tar": {
+   "size": 1936619520,
+   "n_members": 87
+  },
+  "videos/htstep_videos_4025.tar": {
+   "size": 2059192320,
+   "n_members": 79
+  },
+  "videos/htstep_videos_4026.tar": {
+   "size": 2330961920,
+   "n_members": 91
+  },
+  "videos/htstep_videos_4027.tar": {
+   "size": 2119260160,
+   "n_members": 85
+  },
+  "videos/htstep_videos_4028.tar": {
+   "size": 2071080960,
+   "n_members": 89
+  },
+  "videos/htstep_videos_4029.tar": {
+   "size": 1825689600,
+   "n_members": 84
+  },
+  "videos/htstep_videos_4030.tar": {
+   "size": 2576885760,
+   "n_members": 92
+  },
+  "videos/htstep_videos_4031.tar": {
+   "size": 2205818880,
+   "n_members": 84
+  },
+  "videos/htstep_videos_4032.tar": {
+   "size": 2157271040,
+   "n_members": 83
+  },
+  "videos/htstep_videos_4033.tar": {
+   "size": 1641676800,
+   "n_members": 72
+  },
+  "videos/htstep_videos_4034.tar": {
+   "size": 1907159040,
+   "n_members": 91
+  },
+  "videos/htstep_videos_4035.tar": {
+   "size": 2423633920,
+   "n_members": 87
+  },
+  "videos/htstep_videos_4036.tar": {
+   "size": 2107105280,
+   "n_members": 88
+  },
+  "videos/htstep_videos_4037.tar": {
+   "size": 2350510080,
+   "n_members": 85
+  },
+  "videos/htstep_videos_4038.tar": {
+   "size": 2075125760,
+   "n_members": 82
+  },
+  "videos/htstep_videos_4039.tar": {
+   "size": 2031872000,
+   "n_members": 85
+  },
+  "videos/htstep_videos_4040.tar": {
+   "size": 2176204800,
+   "n_members": 89
+  },
+  "videos/htstep_videos_4041.tar": {
+   "size": 2495477760,
+   "n_members": 88
+  },
+  "videos/htstep_videos_4042.tar": {
+   "size": 2309908480,
+   "n_members": 87
+  },
+  "videos/htstep_videos_4043.tar": {
+   "size": 2251130880,
+   "n_members": 90
+  },
+  "videos/htstep_videos_4044.tar": {
+   "size": 2091397120,
+   "n_members": 85
+  }
+ }
+}

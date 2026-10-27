@@ -27,6 +27,11 @@ Plan: `Data/Htstep/HTSTEP_PSEUDO_CAPTION.md`. Metadata do `pseudocap/tools/*.py`
 **Cách chạy.** Luôn chạy tuần tự từ ô 0; cờ `RUN_*` ở ô 0 chỉ bật/tắt phần nặng (ô tắt vẫn định nghĩa hàm cho ô sau).
 Mọi kết quả trung gian nằm trên Drive và có resume, Colab ngắt thì chạy lại từ ô 0.
 
+**Xem tiến trình:** mỗi vòng lặp dài có thanh tqdm; ô 1b (`progress_report()`) in trạng thái từng tar, số video đã trích/lỗi,
+ASR, caption, judge, protocol. Chạy ô 0 → 1 → 1b bất cứ lúc nào (kể cả ở một session khác) để xem, không làm gì nặng.
+Ô 3 xử lý HT-Step từng tar (tải → trích → xóa) và ghi `progress/` trên Drive; Colab ngắt khi đang làm dở một tar thì tar đó
+bị khóa `STALE_HOURS` giờ (đặt `STALE_HOURS = 0` ở ô 0 nếu chắc không còn session nào khác đang chạy).
+
 1. Phiên 1: `RUN_EXTRACT`, `RUN_ASR`, `RUN_SPEED`, `RUN_DEV_GRID` = True → ô 6 in sha256 của protocol.
 2. Tải `htstep_cap_protocol.json` về `pseudocap/configs/` (commit + push), dán sha256 vào `PROTOCOL_SHA256`.
 3. Phiên 2: tắt 4 cờ trên, bật `RUN_YC2_VAL`, `RUN_HTSTEP_VAL`, `RUN_EVAL`, `RUN_JUDGE`.
@@ -36,18 +41,26 @@ Mỗi ô in `CHECK ... OK/FAIL`; `FAIL` dừng ô bằng exception.
 
 code(r'''
 # ô 0. Cấu hình + hàm dùng chung
-import os, re, gc, csv, json, time, random, shutil, hashlib, tarfile, inspect, subprocess
+import os, re, gc, csv, json, time, uuid, random, shutil, hashlib, tarfile, inspect, subprocess
 from pathlib import Path
 from collections import Counter, defaultdict
+from tqdm.auto import tqdm
 
 DRIVE      = '/content/drive/MyDrive/Colab Notebooks/code KL'
 BASE       = f'{DRIVE}/Fushion/htstep_cap'
+PROGRESS   = f'{BASE}/progress'                          # tars.json, videos_done.txt, failed.csv
 REPO_URL   = 'https://github.com/chien24/pseudocap.git'  # metadata/ lấy từ repo, không upload
 REPO_DIR   = '/content/pseudocap'
 META       = f'{REPO_DIR}/metadata'
-YC2_VIDEOS = f'{DRIVE}/Omni/data/YouCookII/videos'     # = DRIVE_DATA/videos của notebook UEMR
-HF_REPO    = 'nguyenminh04/htstep-videos'                # dataset public, video trong tar shard (hf_path)
-LOCAL      = '/content/htcap'                            # đĩa Colab: video tạm, frame giải nén
+YC2_VIDEOS = f'{DRIVE}/Omni/data/YouCookII/videos'     # chỉ đọc; = DRIVE_DATA/videos của notebook UEMR
+HF_REPO    = 'nguyenminh04/htstep-videos'                # video trong tar videos/htstep_videos_XXXX.tar (tar_index.csv)
+LOCAL      = '/content/htcap'                            # đĩa Colab: frame giải nén
+TMP        = '/content/tmp'                              # tar/video tạm, xóa ngay sau khi trích
+FETCH_MODE = 'auto'      # 'tar' tải cả tar | 'range' đọc từng video qua HTTP range | 'auto': theo từng tar, range nếu
+                         # dung lượng tar > 3x tổng video cần trong tar đó (vd. tar có 3/75 video val)
+STALE_HOURS = 3          # tar 'in_progress' của session khác cũ hơn mức này thì làm lại. Chắc chắn không còn session nào
+                         # khác đang chạy (vd. Colab vừa ngắt) thì đặt 0 để làm lại ngay.
+DISK_MARGIN_GB = 5
 SEED       = 0
 N_BOOT     = 1000
 
@@ -93,9 +106,58 @@ def append_jsonl(p, rows):
     with open(p, 'a', encoding='utf-8') as f:
         f.write(''.join(json.dumps(r, ensure_ascii=False) + '\n' for r in rows))
 
+def write_text(p, s):
+    """Ghi nguyên tử: file tạm rồi đổi tên (session bị ngắt giữa chừng không để lại file hỏng)."""
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p + '.tmp', 'w', encoding='utf-8') as f:
+        f.write(s)
+    os.replace(p + '.tmp', p)
+
 def write_json(p, obj):
-    with open(p, 'w', encoding='utf-8') as f:
-        json.dump(obj, f, ensure_ascii=False, indent=1)
+    write_text(p, json.dumps(obj, ensure_ascii=False, indent=1))
+
+def gb_free(p='/content'):
+    return shutil.disk_usage(p).free / 2**30
+
+# ---- tiến trình trích frame/audio (Drive: PROGRESS/) ----
+def videos_done():
+    p = f'{PROGRESS}/videos_done.txt'
+    return set(open(p, encoding='utf-8').read().split()) if os.path.exists(p) else set()
+
+def mark_video_done(ds, vid):
+    d = videos_done() | {f'{ds}/{vid}'}
+    write_text(f'{PROGRESS}/videos_done.txt', ''.join(x + '\n' for x in sorted(d)))
+
+def failed_rows():
+    p = f'{PROGRESS}/failed.csv'
+    return list(csv.DictReader(open(p, encoding='utf-8'))) if os.path.exists(p) else []
+
+def failed_set():
+    return {f"{x['dataset']}/{x['video_id']}" for x in failed_rows()}   # thử lại: xóa dòng trong failed.csv
+
+def log_failed(ds, vid, src, err):
+    import io
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, ['dataset', 'video_id', 'tar_path', 'error'])
+    w.writeheader()
+    w.writerows(failed_rows() + [{'dataset': ds, 'video_id': vid, 'tar_path': src, 'error': str(err)[:300]}])
+    write_text(f'{PROGRESS}/failed.csv', buf.getvalue())
+    print('  FAILED', ds, vid, str(err)[:120], flush=True)
+
+def load_tars():
+    p = f'{PROGRESS}/tars.json'
+    return json.load(open(p, encoding='utf-8')) if os.path.exists(p) else {}
+
+def set_tar(tar, **kw):
+    t = load_tars()
+    t[tar] = {**t.get(tar, {}), **kw, 'updated_at': time.time()}
+    write_json(f'{PROGRESS}/tars.json', t)
+
+os.makedirs(LOCAL, exist_ok=True)
+if not os.path.exists(f'{LOCAL}/session_id'):          # giữ qua restart kernel, mất khi Colab cấp máy mới
+    write_text(f'{LOCAL}/session_id', uuid.uuid4().hex[:12])
+SESSION_ID = open(f'{LOCAL}/session_id').read().strip()
+print('session', SESSION_ID)
 
 def sha256_file(p):
     return hashlib.sha256(Path(p).read_bytes()).hexdigest()
@@ -130,7 +192,7 @@ def load_frames(r):
 
 def restore_frames(rows):
     """Giải nén tar frame (Drive) của video đã xong về LOCAL, một lần mỗi phiên; trả về các segment có frame."""
-    for ds, vid in sorted({(r['dataset'], r['video_id']) for r in rows}):
+    for ds, vid in tqdm(sorted({(r['dataset'], r['video_id']) for r in rows}), desc='giải nén frame về /content'):
         tar = f'{BASE}/cache/frames/{ds}/{vid}.tar'
         if not os.path.isdir(f'{LOCAL}/frames/{ds}/{vid}') and os.path.exists(tar):
             with tarfile.open(tar) as t:
@@ -166,10 +228,9 @@ else:
     subprocess.run(['git', 'clone', '-q', REPO_URL, REPO_DIR], check=True)
 GIT_COMMIT = subprocess.run(['git', '-C', REPO_DIR, 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
 print('pseudocap commit', GIT_COMMIT)
-for d in ['cache/frames/yc2', 'cache/frames/htstep', 'cache/audio/yc2', 'cache/audio/htstep', 'cache/done/yc2',
-          'cache/done/htstep', 'asr/yc2', 'asr/htstep', 'captions/dev_grid', 'judge', 'results', 'export']:
+for d in ['cache/frames/yc2', 'cache/frames/htstep', 'cache/audio/yc2', 'cache/audio/htstep', 'cache/info/yc2',
+          'cache/info/htstep', 'progress', 'asr/yc2', 'asr/htstep', 'captions/dev_grid', 'judge', 'results', 'export']:
     os.makedirs(f'{BASE}/{d}', exist_ok=True)
-os.makedirs(LOCAL, exist_ok=True)
 
 COUNTS = json.loads(re.search(r'<!-- COUNTS (\{.*?\}) -->', open(f'{META}/UPLOAD.md', encoding='utf-8').read(), re.S).group(1))
 for name, (n, sha) in COUNTS.items():
@@ -200,6 +261,49 @@ ROWS = [r for r in MAN if r['has_video']]
 for k in sorted(cnt):
     n_ok = sum(f"{r['dataset']}/{r['split']}" == k for r in ROWS)
     print(f'  {k}: có video {n_ok}/{cnt[k]} segment ({n_ok / cnt[k]:.1%})')
+
+# HT-Step: video -> (tar, member, offset, size) từ tar_index.csv (header tar đọc ở local, revision ghim)
+TARS_META = json.load(open(f'{META}/tar_index_tars.json', encoding='utf-8'))
+HF_REV = TARS_META['revision']
+HT_TAR_OF = {r['video_id']: r['hf_path'] for r in ROWS if r['dataset'] == 'htstep'}
+VIDX = {r['video_id']: {**r, 'offset_data': int(r['offset_data']), 'size': int(r['size'])}
+        for r in csv.DictReader(open(f'{META}/tar_index.csv', encoding='utf-8'))
+        if HT_TAR_OF.get(r['video_id']) == r['tar_path']}
+check('every HT-Step video with has_video is in tar_index', set(VIDX) == set(HT_TAR_OF), f'{len(VIDX)}/{len(HT_TAR_OF)}')
+HT_TARS = sorted({v['tar_path'] for v in VIDX.values()})
+print(f'HT-Step: {len(VIDX)} video trong {len(HT_TARS)} tar (revision {HF_REV[:8]}), '
+      f'tar {sum(TARS_META["tars"][t]["size"] for t in HT_TARS) / 1e9:.1f} GB, video cần {sum(v["size"] for v in VIDX.values()) / 1e9:.1f} GB')
+''')
+
+code(r'''
+# ô 1b. XEM TIẾN TRÌNH: chạy bất cứ lúc nào sau ô 1 (kể cả từ một session khác), chỉ đọc file trên Drive
+def progress_report():
+    vd, fs, tars = videos_done(), failed_set(), load_tars()
+    print(f"=== tiến trình {time.strftime('%H:%M:%S')} | session {SESSION_ID} | đĩa /content trống {gb_free():.1f} GB")
+    st = Counter(tars.get(t, {}).get('status', 'pending') for t in HT_TARS)
+    print(f"tar HT-Step: done {st['done']} / in_progress {st['in_progress']} / pending {st['pending']} (tổng {len(HT_TARS)})")
+    for t in HT_TARS:
+        x = tars.get(t)
+        if x and x.get('status') != 'done':
+            print(f"   {t}: {x['status']} session {x.get('session_id')} {(time.time() - x['updated_at']) / 60:.0f} phút trước"
+                  f"{' lỗi: ' + x['error'][:100] if x.get('error') else ''}")
+    for ds in ('yc2', 'htstep'):
+        vids = {r['video_id'] for r in ROWS if r['dataset'] == ds}
+        d, f = sum(f'{ds}/{v}' in vd for v in vids), sum(f'{ds}/{v}' in fs for v in vids)
+        n_asr = sum(os.path.exists(f'{BASE}/asr/{ds}/{v}.json') for v in vids)
+        print(f'video {ds:6}: trích xong {d}/{len(vids)} | lỗi {f} | còn {len(vids) - d - f} | ASR xong {n_asr}')
+    want = {'dev_grid': 773, 'yc2_val': sum(r['dataset'] == 'yc2' and r['split'] == 'val' for r in ROWS),
+            'htstep_val': sum(r['dataset'] == 'htstep' for r in ROWS)}
+    for p in sorted(Path(f'{BASE}/captions').rglob('*.jsonl')):
+        n = sum(1 for _ in open(p, encoding='utf-8'))
+        print(f"caption {p.relative_to(f'{BASE}/captions')}: {n}/{want['dev_grid' if 'dev_grid' in str(p) else p.stem]}")
+    for p in sorted(Path(f'{BASE}/judge').glob('*.jsonl')):
+        print(f'judge {p.name}: {sum(1 for _ in open(p, encoding="utf-8"))}')
+    pp = f'{BASE}/htstep_cap_protocol.json'
+    print('protocol:', sha256_file(pp) if os.path.exists(pp) else 'chưa có')
+    print('results:', sorted(os.listdir(f'{BASE}/results')))
+
+progress_report()
 ''')
 
 code(r'''
@@ -249,30 +353,17 @@ check('models resolvable', any(REV.values()) and JUDGE and VIS and TXT)
 ''')
 
 code(r'''
-# ô 3. Tải video (YC2 từ Drive, HT-Step từ tar shard trên HF) -> 8 frame/segment + audio cả video, có resume
-import cv2
-from huggingface_hub import hf_hub_download
-FAILED = f'{BASE}/cache/failed.csv'
+# ô 3. Trích 8 frame/segment + audio cả video. YC2: đọc từ Drive. HT-Step: từng tar từ HF (tải -> trích -> xóa), tiến trình
+#      trên Drive (progress/tars.json, videos_done.txt, failed.csv). Chạy lại ở session mới sẽ tiếp tục từ chỗ dừng.
+import cv2, requests
+from huggingface_hub import hf_hub_download, hf_hub_url
 
 def seg_times(s, e):
     return [s + (i + 0.5) * (e - s) / N_FRAMES for i in range(N_FRAMES)]
 
-def done(ds, vid):
-    return os.path.exists(f'{BASE}/cache/done/{ds}/{vid}.json')
-
-def failed_set():
-    if not os.path.exists(FAILED):
-        return set()
-    return {(x['dataset'], x['video_id']) for x in csv.DictReader(open(FAILED, encoding='utf-8'))}
-
-def log_failed(ds, vid, err):
-    new = not os.path.exists(FAILED)
-    with open(FAILED, 'a', newline='', encoding='utf-8') as f:
-        w = csv.writer(f)
-        if new:
-            w.writerow(['dataset', 'video_id', 'error'])
-        w.writerow([ds, vid, str(err)[:300]])
-    print('  FAILED', ds, vid, str(err)[:120])
+for p in Path(f'{BASE}/cache/done').glob('*/*.json'):     # dấu done của bản notebook trước
+    if f'{p.parent.name}/{p.stem}' not in videos_done():
+        mark_video_done(p.parent.name, p.stem)
 
 def extract_video(path, ds, vid, segs):
     cap = cv2.VideoCapture(path)
@@ -302,80 +393,136 @@ def extract_video(path, ds, vid, segs):
     res = subprocess.run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', path, '-vn', '-ac', '1', '-ar', '16000',
                           '-c:a', 'libopus', '-b:a', '32k', aud], capture_output=True, text=True)
     has_audio = res.returncode == 0 and os.path.exists(aud)
-    if has_audio:
-        shutil.copy(aud, f'{BASE}/cache/audio/{ds}/{vid}.opus')
-    # Drive chậm với hàng chục nghìn file nhỏ: lưu frame thành 1 tar mỗi video, ô sau giải nén về LOCAL
+    # mọi thứ ghi ở /content trước, xong cả video mới copy lên Drive; Drive chậm với nhiều file nhỏ nên frame = 1 tar/video
     tmp = f'{LOCAL}/{vid}.tar'
     with tarfile.open(tmp, 'w') as t:
         t.add(f'{LOCAL}/frames/{ds}/{vid}', arcname=vid)
+    if has_audio:
+        shutil.copy(aud, f'{BASE}/cache/audio/{ds}/{vid}.opus')
     shutil.copy(tmp, f'{BASE}/cache/frames/{ds}/{vid}.tar')
     os.remove(tmp)
-    write_json(f'{BASE}/cache/done/{ds}/{vid}.json', {'segments': len(segs), 'repeated_frames': n_repeat,
+    write_json(f'{BASE}/cache/info/{ds}/{vid}.json', {'segments': len(segs), 'repeated_frames': n_repeat,
                                                       'duration_cv2': dur, 'audio': has_audio, 'ffmpeg_err': res.stderr[-300:]})
+    mark_video_done(ds, vid)
+
+def process(path, ds, vid, src):
+    """Trích một video rồi xóa file video; lỗi thì ghi failed.csv, không dừng notebook."""
+    try:
+        extract_video(path, ds, vid, BY_VID[(ds, vid)])
+    except Exception as e:
+        log_failed(ds, vid, src, e)
+    finally:
+        if os.path.exists(path):
+            os.remove(path)
+
+def need_disk(gb, what):
+    check(f'disk for {what}', gb_free() >= gb + DISK_MARGIN_GB,
+          f'cần {gb:.1f} + {DISK_MARGIN_GB} GB, trống {gb_free():.1f} GB')
+
+def range_get(tar, off, size, out):
+    """Đọc byte [off, off+size) của tar trên HF bằng HTTP range, ghi ra out. Resolve URL CDN mỗi video (URL ký có hạn)."""
+    url = hf_hub_url(HF_REPO, tar, repo_type='dataset', revision=HF_REV)
+    auth = {'Authorization': f'Bearer {HF_TOKEN}'} if HF_TOKEN else {}
+    for attempt in range(4):
+        try:
+            r = requests.head(url, allow_redirects=False, timeout=60, headers=auth)
+            loc, hdr = (r.headers['Location'], {}) if r.is_redirect else (url, auth)
+            with requests.get(loc, headers={**hdr, 'Range': f'bytes={off}-{off + size - 1}'}, stream=True, timeout=120) as g:
+                g.raise_for_status()
+                assert g.status_code == 206, f'HTTP {g.status_code}, không phải range'
+                with open(out, 'wb') as f:
+                    for ch in g.iter_content(1 << 22):
+                        f.write(ch)
+            if os.path.getsize(out) == size:
+                return
+            raise IOError(f'nhận {os.path.getsize(out)} byte, cần {size}')
+        except Exception:
+            if attempt == 3:
+                raise
+            time.sleep(5 * 2 ** attempt)
 
 BY_VID = defaultdict(list)
 for r in ROWS:
     BY_VID[(r['dataset'], r['video_id'])].append(r)
 
 if RUN_EXTRACT:
-    todo = {k: v for k, v in BY_VID.items() if not done(*k) and k not in failed_set()}   # thử lại: xóa dòng trong failed.csv
-    print('video cần xử lý:', Counter(ds for ds, _ in todo))
-    os.makedirs(f'{LOCAL}/video', exist_ok=True)
-    t0 = time.time()
-    for i, ((ds, vid), segs) in enumerate(sorted((k, v) for k, v in todo.items() if k[0] == 'yc2'), 1):
-        tmp = f'{LOCAL}/video/{vid}.mp4'
-        try:
-            shutil.copy(f'{YC2_VIDEOS}/{vid}.mp4', tmp)
-            extract_video(tmp, ds, vid, segs)
-        except Exception as e:
-            log_failed(ds, vid, e)
-        finally:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-        if i % 50 == 0:
-            print(f'  yc2 {i} video, {time.time() - t0:.0f}s', flush=True)
+    print('--- ô 3 bắt đầu'); progress_report()
+    os.makedirs(TMP, exist_ok=True)
 
-    shards = defaultdict(list)
-    for (ds, vid), segs in todo.items():
-        if ds == 'htstep':
-            shards[segs[0]['hf_path']].append(vid)
-    for shard, vids in sorted(shards.items()):
-        t0 = time.time()
+    skip = videos_done() | failed_set()
+    for vid in tqdm(sorted(v for ds, v in BY_VID if ds == 'yc2' and f'yc2/{v}' not in skip), desc='YC2 video (Drive)'):
+        src, tmp = f'{YC2_VIDEOS}/{vid}.mp4', f'{TMP}/{vid}.mp4'
         try:
-            tar_path = hf_hub_download(HF_REPO, shard, repo_type='dataset', local_dir=f'{LOCAL}/dl', token=HF_TOKEN)
+            shutil.copy(src, tmp)                    # chỉ đọc thư mục YC2, không ghi gì vào đó
         except Exception as e:
-            for v in vids:
-                log_failed('htstep', v, f'download {shard}: {e}')
+            log_failed('yc2', vid, src, e)
             continue
-        need, found = set(vids), set()
-        with tarfile.open(tar_path) as t:
-            for m in t:
-                vid = Path(m.name).stem
-                if not (m.isfile() and vid in need):
-                    continue
-                t.extract(m, f'{LOCAL}/video', filter='data')
-                path = f'{LOCAL}/video/{m.name}'
-                try:
-                    extract_video(path, 'htstep', vid, BY_VID[('htstep', vid)])
-                    found.add(vid)
-                except Exception as e:
-                    log_failed('htstep', vid, e)
-                    found.add(vid)
-                finally:
-                    os.remove(path)
-        for v in sorted(need - found):
-            log_failed('htstep', v, f'not in {shard}')
-        os.remove(tar_path)
-        print(f'  {shard}: {len(found)}/{len(need)} video, {time.time() - t0:.0f}s', flush=True)
+        process(tmp, 'yc2', vid, src)
 
-n_done = Counter(ds for ds, vid in BY_VID if done(ds, vid))
-failed = failed_set()
-left = [k for k in BY_VID if not done(*k) and k not in failed]
-print('video xong:', dict(n_done), '| failed.csv:', len(failed), 'video | chưa xử lý:', len(left))
+    def tar_mode(tar):
+        need = sum(x['size'] for x in VIDX.values() if x['tar_path'] == tar)
+        return FETCH_MODE if FETCH_MODE != 'auto' else ('range' if TARS_META['tars'][tar]['size'] > 3 * need else 'tar')
+    print('HT-Step chế độ:', {Path(t).stem: tar_mode(t) for t in HT_TARS})
+    bar = tqdm(HT_TARS, desc='HT-Step tar')
+    for tar in bar:
+        bar.set_postfix_str(Path(tar).stem)
+        st = load_tars().get(tar, {})
+        if st.get('status') == 'done':
+            continue
+        age_h = (time.time() - st.get('updated_at', 0)) / 3600
+        if st.get('status') == 'in_progress' and st.get('session_id') != SESSION_ID and age_h < STALE_HOURS:
+            print(f"  bỏ qua {tar}: session {st['session_id']} đang làm ({age_h * 60:.0f} phút trước; xem STALE_HOURS ở ô 0)")
+            continue
+        set_tar(tar, status='in_progress', session_id=SESSION_ID, error=None)
+        skip = videos_done() | failed_set()
+        mine = sorted(v for v, x in VIDX.items() if x['tar_path'] == tar)
+        vids = [v for v in mine if f'htstep/{v}' not in skip]
+        work, mode = f'{TMP}/{Path(tar).stem}', tar_mode(tar)
+        os.makedirs(work, exist_ok=True)
+        try:
+            if vids and mode == 'tar':
+                need_disk((TARS_META['tars'][tar]['size'] + max(VIDX[v]['size'] for v in vids)) / 2**30, tar)
+                p = hf_hub_download(HF_REPO, tar, repo_type='dataset', revision=HF_REV, local_dir=work, token=HF_TOKEN)
+                with tarfile.open(p) as t:
+                    for v in tqdm(vids, desc=f'  {Path(tar).stem} video', leave=False):
+                        try:
+                            m = t.getmember(VIDX[v]['member_name'])
+                        except KeyError:
+                            log_failed('htstep', v, tar, 'member not in tar')
+                            continue
+                        t.extract(m, f'{work}/v', filter='data')
+                        process(f'{work}/v/{m.name}', 'htstep', v, tar)
+            elif vids:
+                for v in tqdm(vids, desc=f'  {Path(tar).stem} video (range)', leave=False):
+                    need_disk(VIDX[v]['size'] / 2**30, v)
+                    out = f'{work}/{v}.mp4'
+                    try:
+                        range_get(tar, VIDX[v]['offset_data'], VIDX[v]['size'], out)
+                    except Exception as e:
+                        log_failed('htstep', v, tar, f'range read: {e}')
+                        continue
+                    process(out, 'htstep', v, tar)
+        except RuntimeError:                          # CHECK FAIL (thiếu đĩa): dừng và báo
+            set_tar(tar, status='pending', error='thiếu đĩa')
+            raise
+        except Exception as e:                        # tải tar lỗi: tar về pending, chạy lại ô 3 sau
+            set_tar(tar, status='pending', error=f'{type(e).__name__}: {e}'[:300])
+            print('  LỖI', tar, type(e).__name__, str(e)[:200], flush=True)
+            continue
+        finally:
+            shutil.rmtree(work, ignore_errors=True)   # xóa tar + video giải nén, kể cả khi có lỗi
+            check(f'{Path(tar).stem}: tar/video tạm đã xóa', not os.path.exists(work))
+        vd, fs = videos_done(), failed_set()
+        set_tar(tar, status='done', session_id=SESSION_ID, n_ok=sum(f'htstep/{v}' in vd for v in mine),
+                n_fail=sum(f'htstep/{v}' in fs for v in mine))
+    print('--- ô 3 kết thúc'); progress_report()
+
+finished = videos_done() | failed_set()
+left = [k for k in BY_VID if f'{k[0]}/{k[1]}' not in finished]
 READY = restore_frames(ROWS)
 print('segment có frame:', dict(Counter(f"{r['dataset']}/{r['split']}" for r in READY)))
 if RUN_EXTRACT:
-    check('every video done or logged as failed', not left, f'{len(left)} chưa xử lý')
+    check('every video done or logged as failed', not left, f'{len(left)} video chưa xử lý: chạy lại ô 3')
 check('frames ready', len(READY) > 0)
 ''')
 
@@ -397,10 +544,11 @@ if RUN_ASR:
     check('same ASR model as cached files', prev <= {ASR_NAME}, str(prev))
     pipe = BatchedInferencePipeline(model=wm)
     t0, n_audio_s = time.time(), 0.0
-    for i, (ds, vid) in enumerate(READY_VIDS, 1):
+    todo = [k for k in READY_VIDS if not os.path.exists(f'{BASE}/asr/{k[0]}/{k[1]}.json')]
+    print(f'ASR: {len(READY_VIDS) - len(todo)} video đã có, còn {len(todo)}')
+    bar = tqdm(todo, desc='ASR video')
+    for ds, vid in bar:
         out = f'{BASE}/asr/{ds}/{vid}.json'
-        if os.path.exists(out):
-            continue
         aud = f'{BASE}/cache/audio/{ds}/{vid}.opus'
         if not os.path.exists(aud):
             write_json(out, {'model': ASR_NAME, 'language': None, 'words': [], 'note': 'no audio stream'})
@@ -410,8 +558,7 @@ if RUN_ASR:
         write_json(out, {'model': ASR_NAME, 'language': info.language,
                          'language_probability': round(info.language_probability, 3), 'words': words})
         n_audio_s += info.duration
-        if i % 25 == 0:
-            print(f'  {i}/{len(READY_VIDS)}  {n_audio_s / max(time.time() - t0, 1):.0f}x realtime', flush=True)
+        bar.set_postfix_str(f'{n_audio_s / max(time.time() - t0, 1):.0f}x realtime')
     wm = pipe = None
     free()
 
@@ -511,14 +658,14 @@ def caption_rows(rows, path, gen, variant, extra):
     """Sinh cho rows, ghi nối mỗi 50 segment, bỏ qua key đã có trong path."""
     have = {r['key'] for r in read_jsonl(path)}
     todo = [r for r in rows if r['key'] not in have]
-    buf, t0 = [], time.time()
-    for i, r in enumerate(todo, 1):
+    buf = []
+    bar = tqdm(todo, desc=os.path.basename(path), initial=len(rows) - len(todo), total=len(rows))
+    for i, r in enumerate(bar, 1):
         c, src, raw = caption_one(gen, r, variant)
         buf.append({'key': r['key'], 'caption': c, 'cap_source': src, 'prompt_variant': variant, 'raw': raw, **extra})
         if len(buf) == 50 or i == len(todo):
             append_jsonl(path, buf)
             buf = []
-            print(f'  {os.path.basename(path)} {i}/{len(todo)}  {i / (time.time() - t0) * 3600:.0f} seg/h', flush=True)
     out = {r['key']: r for r in read_jsonl(path)}
     check(f'{os.path.basename(path)} complete', all(r['key'] in out for r in rows), f'{len(out)}/{len(rows)}')
     return out
@@ -545,7 +692,7 @@ if RUN_SPEED:
             continue
         caption_one(gen, sample[0], 'P2')            # warm-up
         t0 = time.time()
-        outs = [caption_one(gen, r, 'P2') for r in sample]
+        outs = [caption_one(gen, r, 'P2') for r in tqdm(sample, desc=f'đo tốc độ {code}')]
         dt = time.time() - t0
         SPEED[code] = {'seg_per_h_P2': round(20 / dt * 3600), 'model_ok': sum(o[1] == 'model' for o in outs),
                        'peak_vram_gb': round(torch.cuda.max_memory_allocated() / 2**30, 2)}
@@ -734,7 +881,7 @@ if RUN_EVAL:
     from bert_score import score as bert_score
     R51 = {'n_segments': len(rows), 'systems': {}}
     PER = {}
-    for name, hyp in systems.items():
+    for name, hyp in tqdm(systems.items(), desc='5.1 hệ'):
         sc, per = coco({k: refs[k] for k in hyp}, hyp)
         _, _, f1 = bert_score([hyp[k] or 'none' for k in hyp], [refs[k] for k in hyp], model_type='roberta-large',
                               lang='en', batch_size=64, verbose=False)
@@ -842,7 +989,7 @@ if RUN_EVAL:
         ('htstep_val', HT_VAL, load_caps('htstep_val'), {'pseudo': None, 'headline': 'headline', 'asr': 'asr'},
          lambda a, b: a['step_id'] == b['step_id'])]:
         rows = [r for r in rows if r['key'] in caps]
-        IMG = {r['key']: img_emb(r) for r in rows}
+        IMG = {r['key']: img_emb(r) for r in tqdm(rows, desc=f'SigLIP frame {ds}')}
         getters = {n: (lambda r: caps[r['key']]['caption']) if f is None else (lambda r: asr_window(r)) if f == 'asr'
                    else (lambda r, f=f: r[f]) for n, f in systems.items()}
         T = txt_emb([g(r) for g in getters.values() for r in rows])
@@ -893,7 +1040,7 @@ if RUN_EVAL:
         ('htstep_val_pseudo', HT_VAL, lambda r, c=load_caps('htstep_val'): c[r['key']]['caption'])]:
         caps = docs([text_of(r) for r in rows])
         bad, top = [], Counter()
-        for r, d in zip(rows, caps):
+        for r, d in tqdm(list(zip(rows, caps)), desc=f'5.4a {name}'):
             g = set().union(*map(words, docs(ground_texts(r))))
             u = nouns(d) - g
             bad.append(bool(u))
@@ -971,7 +1118,7 @@ if RUN_JUDGE:
         path = f'{BASE}/judge/{name}.jsonl'
         have = {x['key'] for x in read_jsonl(path)}
         buf = []
-        for i, (r, cap) in enumerate(items, 1):
+        for i, (r, cap) in enumerate(tqdm(items, desc=f'judge {name}'), 1):
             if r['key'] in have:
                 continue
             raw = judge(r, cap)

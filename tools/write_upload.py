@@ -8,7 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 META = ROOT / "metadata"
-FILES = ["manifest.jsonl", "yc2_train_text.jsonl", "yc2_dev_val_split.json", "availability.csv", "yc2_stats.json"]
+FILES = ["manifest.jsonl", "yc2_train_text.jsonl", "yc2_dev_val_split.json", "availability.csv", "tar_index.csv",
+         "tar_index_tars.json", "yc2_stats.json"]
 DRIVE = "MyDrive/Colab Notebooks/code KL/Fushion/htstep_cap"     # same root as the UEMR notebooks (.../code KL/Fushion/uemr)
 
 
@@ -31,7 +32,8 @@ def main():
         "Notebook: upload `notebooks/htstep_pseudocap_AZ.ipynb` (hoặc mở từ GitHub trong Colab), GPU T4.",
         "",
         "Video không cần upload: YC2 đọc từ `Colab Notebooks/code KL/Omni/data/YouCookII/videos/<video_id>.mp4`",
-        "(như các notebook UEMR), HT-Step tải từ HF `nguyenminh04/htstep-videos` (tar shard, cột `hf_path`).",
+        "(như các notebook UEMR), HT-Step lấy từ HF `nguyenminh04/htstep-videos` theo từng tar (`tar_index.csv`:",
+        "tar, member, offset, size; revision ghim trong `tar_index_tars.json`). Tiến trình ở Drive `.../htstep_cap/progress/`.",
         "",
         "Ô 1 của notebook đọc dòng dưới đây và kiểm số dòng + sha256 từng file:",
         "",

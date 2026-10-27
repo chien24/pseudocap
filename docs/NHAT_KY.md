@@ -102,4 +102,42 @@ Tốc độ, `CHECK` từng ô: chưa có. Ghi vào đây khi user gửi log.
 
 Commit: `f66a17f` (tools + metadata + notebook + nhật ký), sau đó `.gitattributes` (`* -text`, giữ nguyên byte để sha256 ở ô 1 khớp).
 
+## 2026-10-27: plan cập nhật lần 3 ([v3])
+
+**A2: chỉ mục tar (`tools/build_tar_index.py`).** Đọc header 512 byte của từng tar bằng HTTP range (resolve redirect HF một lần
+mỗi tar rồi đọc thẳng trên CDN; 24 luồng, khoảng 9 phút cho 113 tar; không tải dữ liệu video). Xử lý cả header GNU longname và
+pax. Ghi `metadata/tar_index.csv` (`tar_path, member_name, video_id, offset_data, size`), `tar_index_tars.json` (revision
+`541f392c`, dung lượng + số member từng tar; resume theo dung lượng) và `tar_index_report.json`.
+- Quy tắc `video_id` = tên file bỏ đuôi (`-25-1nbOki0.mp4` → `-25-1nbOki0`). Không có member lạ (0 member không phải video).
+- 113 tar, 7.453 member = 7.453 video, không video nào nằm trong 2 tar.
+- Đối chiếu với danh sách của repo (`manifest.json` + `htstep-feats/dl/done/<n>.json`): khớp 7.453/7.453, 0 lệch tar.
+  → `hf_path` trong manifest giữ nguyên, `manifest.jsonl` và `availability.csv` không đổi byte (sha256 như cũ).
+- HT-Step val: cần 5 tar (`1000–1004`), tổng 8,6 GB, video val trong đó 7,0 GB (1,2×). Tar 1004 chỉ có 3/75 video val.
+
+**Ô 3 viết lại theo 4.0:**
+- YC2 đọc từ Drive (copy về `/content/tmp`, không ghi vào thư mục YC2).
+- HT-Step đi theo từng tar, thứ tự cố định. Tiến trình nằm trong `progress/{tars.json, videos_done.txt, failed.csv}`, ghi nguyên
+  tử bằng file tạm + `os.replace`.
+- Khóa `in_progress` theo `session_id`, quá `STALE_HOURS = 3` thì coi như session đó đã chết.
+- Kiểm tra đĩa trước khi tải; thiếu đĩa thì CHECK FAIL.
+- Sau mỗi tar xóa thư mục tạm, kể cả khi có lỗi, và CHECK đã xóa.
+- Tải tar lỗi: tar trở về `pending`, kèm `error`.
+
+**Thay đổi so với plan:**
+12. Chọn `tar` hay `range` (mục 4.0, "tối ưu") **theo từng tar** thay vì cho cả tập: range nếu dung lượng tar > 3 × tổng video
+    cần trong tar đó. Với số liệu hiện tại: 1000–1003 tải cả tar, 1004 đọc range 3 video.
+13. `session_id` lưu ở `/content/htcap/session_id`: còn giữ khi restart kernel, mất khi Colab cấp máy mới. Khi đó tar đang làm dở
+    bị khóa 3 giờ; user có thể đặt `STALE_HOURS = 0` nếu chắc không còn session nào khác.
+14. `progress/` nằm dưới gốc `.../code KL/Fushion/htstep_cap/`, giống mục 1 của bảng thay đổi.
+15. Thông tin từng video (frame lặp, có audio) ghi riêng ở `cache/info/<ds>/<vid>.json`. `videos_done.txt` chỉ chứa
+    `dataset/video_id`. Dấu `cache/done/` của bản notebook trước được tự chuyển sang `videos_done.txt`.
+
+**Xem tiến trình:**
+- Ô 1b `progress_report()` in trạng thái từng tar, số video đã trích/lỗi/còn lại, ASR, caption, judge, protocol và dung lượng
+  đĩa trống. Ô 3 gọi hàm này lúc bắt đầu và lúc kết thúc.
+- Thanh tqdm có ở: các vòng tar/video, ASR, đo tốc độ, sinh caption (lưới dev, YC2 val, HT-Step val), SigLIP, 5.1, 5.4a và
+  giám khảo.
+
+Mục 0.6 (vẫn giữ frame + ASR; không làm bản chỉ dùng text) trùng với notebook hiện tại, không cần sửa.
+
 2026-10-27 (sau): metadata không upload nữa: ô 1 clone/pull `github.com/chien24/pseudocap` (public) vào `/content/pseudocap`, đọc `metadata/` từ đó; protocol ghi thêm `pseudocap_commit`; `verify_protocol` kiểm sha256 metadata không đổi sau khi khóa. Commit `dcde5bb`.

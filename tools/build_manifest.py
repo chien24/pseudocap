@@ -1,7 +1,7 @@
 """Build metadata/manifest.jsonl (YC2 dev+val, HT-Step val), yc2_train_text.jsonl, yc2_dev_val_split.json.
 
-Text only: reads annotation files and the HF repo's shard lists (small json), never a video.
-Run: python -I -X utf8 tools/build_manifest.py
+Text only: reads annotation files and metadata/tar_index.csv, never a video.
+Run after build_tar_index.py: python -I -X utf8 tools/build_manifest.py
 """
 import csv
 import hashlib
@@ -9,14 +9,12 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from huggingface_hub import HfApi, hf_hub_download
-
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "metadata"
 HTSTEP = ROOT.parent / "htstep" / "data"
 YC2_META = ROOT.parents[1] / "YouCookII" / "metadata"
 YC2_FOOD = ROOT.parents[1] / "data" / "label_foodtype.csv"            # official YC2 recipe_type -> name
-HF_VIDEOS, HF_FEATS = "nguyenminh04/htstep-videos", "nguyenminh04/htstep-feats"
+HF_VIDEOS = "nguyenminh04/htstep-videos"
 YC2_REPO = "drive:Colab Notebooks/code KL"           # YC2 videos live on Drive, not HF (as in Fushion notebooks)
 YC2_PATH = "Omni/data/YouCookII/videos/{}.mp4"
 
@@ -42,19 +40,14 @@ def write_jsonl(p, rows):
 
 
 def htstep_shard_map():
-    """video_id -> tar path. manifest.json is stale (95 of the shards); the rest come from htstep-feats dl/done/<n>.json."""
-    api = HfApi()
-    tars = sorted(f for f in api.list_repo_files(HF_VIDEOS, repo_type="dataset") if f.endswith(".tar"))
-    shards = read_json(hf_hub_download(HF_VIDEOS, "manifest.json", repo_type="dataset"))["shards"]
-    where = {v: s for s, d in shards.items() for v in d["videos"]}
-    extra = [t for t in tars if t not in shards]
-    for t in extra:
-        n = t.rsplit("_", 1)[1][:-4]
-        for v in read_json(hf_hub_download(HF_FEATS, f"dl/done/{n}.json", repo_type="dataset"))["ok"]:
-            assert v not in where, (v, t)
-            where[v] = t
-    assert not set(shards) - set(tars), "manifest.json names a shard missing from the repo"
-    return where, {"tars": len(tars), "in_manifest_json": len(shards), "from_done_json": extra}
+    """video_id -> tar path, from metadata/tar_index.csv (tools/build_tar_index.py reads the tar headers on HF).
+    A video found in several tars takes the first tar in sorted order."""
+    with open(OUT / "tar_index.csv", encoding="utf-8", newline="") as f:
+        idx = [r for r in csv.DictReader(f) if r["video_id"]]
+    where = {}
+    for r in sorted(idx, key=lambda r: r["tar_path"]):
+        where.setdefault(r["video_id"], r["tar_path"])
+    return where, {"tars": len({r["tar_path"] for r in idx}), "source": "metadata/tar_index.csv"}
 
 
 def htstep_rows(where):
