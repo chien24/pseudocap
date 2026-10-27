@@ -1,0 +1,67 @@
+{
+ "htstep_val_videos": 600,
+ "htstep_val_videos_video_splits.json": 600,
+ "htstep_val_segments": 3441,
+ "htstep_subsets_in_annotations": {
+  "train": 17472,
+  "val_seen": 600
+ },
+ "htstep_test_annotated": 0,
+ "htstep_partial": {
+  "Partial Match": 2440,
+  "Full Match": 1001
+ },
+ "htstep_overlapping_pairs": 47,
+ "htstep_videos_with_overlap": 37,
+ "htstep_repeated_step_in_video": 1054,
+ "htstep_steps_per_task_median": 10,
+ "start_ge_end": [],
+ "htstep_missing_headline": [],
+ "htstep_with_description": 2756,
+ "yc2": {
+  "dev": {
+   "videos": 104,
+   "segments": 773
+  },
+  "val": {
+   "videos": 394,
+   "segments": 3030
+  }
+ },
+ "yc2_val_segments_in_annotations": 3031,
+ "yc2_val_dropped_by_uemr": [
+  "hs2h7nb5PHQ_4"
+ ],
+ "yc2_train": {
+  "videos": 1229,
+  "captions": 9564
+ },
+ "yc2_train_overlap_dev_val": [],
+ "yc2_dev_overlap_val": [],
+ "yc2_start_ge_end_or_zero_len": [],
+ "hf_shards": {
+  "tars": 113,
+  "in_manifest_json": 95,
+  "from_done_json": [
+   "videos/htstep_videos_4027.tar",
+   "videos/htstep_videos_4028.tar",
+   "videos/htstep_videos_4029.tar",
+   "videos/htstep_videos_4030.tar",
+   "videos/htstep_videos_4031.tar",
+   "videos/htstep_videos_4032.tar",
+   "videos/htstep_videos_4033.tar",
+   "videos/htstep_videos_4034.tar",
+   "videos/htstep_videos_4035.tar",
+   "videos/htstep_videos_4036.tar",
+   "videos/htstep_videos_4037.tar",
+   "videos/htstep_videos_4038.tar",
+   "videos/htstep_videos_4039.tar",
+   "videos/htstep_videos_4040.tar",
+   "videos/htstep_videos_4041.tar",
+   "videos/htstep_videos_4042.tar",
+   "videos/htstep_videos_4043.tar",
+   "videos/htstep_videos_4044.tar"
+  ]
+ },
+ "hf_videos_total": 7453
+}

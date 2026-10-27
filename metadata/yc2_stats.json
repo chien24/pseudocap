@@ -1,0 +1,136 @@
+{
+ "source": "metadata/yc2_train_text.jsonl (YC2 subset 'training' minus dev, 1229 videos)",
+ "n_captions": 9564,
+ "words": {
+  "median": 8,
+  "p10": 5,
+  "p90": 14,
+  "min": 2,
+  "max": 43,
+  "mean": 8.81
+ },
+ "lowercase_rate": 1.0,
+ "trailing_period_rate": 0.0,
+ "top30_first_words": [
+  [
+   "add",
+   3147
+  ],
+  [
+   "place",
+   529
+  ],
+  [
+   "mix",
+   416
+  ],
+  [
+   "cut",
+   378
+  ],
+  [
+   "pour",
+   336
+  ],
+  [
+   "put",
+   284
+  ],
+  [
+   "cook",
+   245
+  ],
+  [
+   "heat",
+   230
+  ],
+  [
+   "chop",
+   200
+  ],
+  [
+   "spread",
+   194
+  ],
+  [
+   "fry",
+   172
+  ],
+  [
+   "remove",
+   158
+  ],
+  [
+   "slice",
+   153
+  ],
+  [
+   "take",
+   139
+  ],
+  [
+   "boil",
+   120
+  ],
+  [
+   "cover",
+   102
+  ],
+  [
+   "coat",
+   101
+  ],
+  [
+   "season",
+   101
+  ],
+  [
+   "stir",
+   98
+  ],
+  [
+   "drain",
+   93
+  ],
+  [
+   "flip",
+   91
+  ],
+  [
+   "roll",
+   88
+  ],
+  [
+   "sprinkle",
+   83
+  ],
+  [
+   "peel",
+   80
+  ],
+  [
+   "combine",
+   77
+  ],
+  [
+   "transfer",
+   67
+  ],
+  [
+   "blend",
+   59
+  ],
+  [
+   "bake",
+   57
+  ],
+  [
+   "dip",
+   57
+  ],
+  [
+   "mash",
+   51
+  ]
+ ]
+}
