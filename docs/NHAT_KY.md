@@ -140,4 +140,61 @@ pax. Ghi `metadata/tar_index.csv` (`tar_path, member_name, video_id, offset_data
 
 Mục 0.6 (vẫn giữ frame + ASR; không làm bản chỉ dùng text) trùng với notebook hiện tại, không cần sửa.
 
+## 2026-10-27: v4, pseudo-caption cho toàn bộ HT-Step có video
+
+**Split có annotation công khai:** chỉ `train` và `val_seen`. Test và `val_unseen` không có annotation (xem A0), nên không có
+gì để thêm. `has_video` lấy theo `tar_index.csv` đã có, không lập chỉ mục lại.
+
+| Split HT-Step | Video có trên HF | Segment có video |
+|---|---|---|
+| train | 7.110 / 17.472 (40,7%) | 44.151 / 103.293 (42,7%) |
+| val (val_seen) | 343 / 600 (57,2%) | 2.195 / 3.441 (63,8%) |
+| **tổng** | **7.453 / 18.072 (41,2%)** | **46.346 / 106.734 (43,4%)** |
+
+Mọi segment train đều có `start < end` và có headline (0 lỗi). Mọi member trong 113 tar đều là video có annotation (train
+hoặc val).
+
+**Thay đổi so với yêu cầu v4:**
+16. Các dòng train **không** nằm trong `manifest.jsonl`. Nếu ghi dạng jsonl, mỗi dòng kèm `task_headlines` và mô tả, file sẽ
+    khoảng 135 MB, quá giới hạn 100 MB/file của GitHub (ô 1 clone repo). Vì vậy chúng nằm ở
+    `metadata/manifest_htstep_train.jsonl.gz`: cùng schema, 103.293 dòng, 14,7 MB, gzip với mtime 0 nên byte cố định. Ô 1 đọc
+    cả hai file thành một `MAN`. `manifest.jsonl` không đổi byte. `UPLOAD.md` kiểm số dòng sau giải nén và sha256 của file nén.
+17. `tar_order.txt`: 5 tar val (1000–1004) trước, rồi 108 tar còn lại theo số hiệu.
+18. **Lỗ hổng:** tar 1004 (mode extract) chứa thêm **72 video train / 487 segment**. Theo v4, lượt "full" chỉ chạy trên tar
+    không có video val, còn tar val đã done thì không làm lại, nên 72 video này **không có caption**. Lượt full gồm 108 tar, 7.038
+    video, 43.664 segment.
+19. Cổng của ô 8b:
+    - T4 trượt nếu cận **trên** CI của acc@1 < 0,85.
+    - T6 là ngưỡng "≤ 20%", nên trượt nếu cận **dưới** CI của tỉ lệ unsupported > 0,20.
+    - T1 trượt thì T6 = N/A và không chặn (như mục 6).
+    - Thiếu điều kiện (protocol, caption val, file kết quả 5.2/5.4b) thì luôn chặn. `FORCE_FULL_PASS` chỉ bỏ qua trường hợp
+      T4/T6 trượt.
+    - Ô 8b chặn bằng cách in `CHECK full pass gate STOP` và **không raise exception**, để các ô 9–11 sau đó vẫn chạy được.
+20. Thêm cờ `RUN_FULL_PASS`, mặc định False. Nếu không có cờ này, ô 8b sẽ gọi `verify_protocol()` ngay ở phiên 1 và FAIL. Phiên
+    3 trở đi chỉ bật cờ này.
+21. Lượt full trong một tar đi theo pha: (1) tải/đọc range, trích frame + audio vào `/content`, **xóa tar + video ngay sau pha
+    này** (CHECK đã xóa); (2) ASR từng video; (3) sinh caption theo split; (4) xóa frame/audio (CHECK), ghi `videos_done`, tar
+    done. Thứ tự này cho phép nạp ASR rồi đến model sinh **lần lượt** trong từng tar khi VRAM không đủ cho cả hai.
+    - Cách quyết định giữ cả hai model: đỉnh VRAM của model sinh (ô 5) + VRAM của ASR (ô 4, đo bằng `torch.cuda.mem_get_info`,
+      vì ctranslate2 không đi qua bộ cấp phát của torch) + 1 GB < VRAM của T4.
+    - VRAM đo được ghi vào `tars.json[...].vram_gb` và `results/full_pass_vram.json`. Chép số này vào đây khi có log.
+22. Resume trong một tar:
+    - Bỏ qua video đã done, ASR đã có, key caption đã có.
+    - Video đã có ASR và đủ caption (session trước bị ngắt trước khi ghi done) thì đánh dấu done luôn, không tải lại.
+23. Chọn cách lấy video cho tar full: đọc range nếu tar có < 20% số member cần dùng, ngược lại tải cả tar. Với 108 tar hiện tại,
+    mọi member đều là video train nên luôn tải cả tar.
+24. Ước lượng thời gian:
+    - Ô 5 ghi `results/full_pass_estimate.json`: giờ GPU cho caption theo từng model (P2, chưa có anchor) và giờ ASR (tổng thời
+      lượng video / tốc độ realtime đo ở ô 4). Chưa tính thời gian tải tar và trích frame.
+    - Sau tar full đầu tiên, ô 8b ghi `full_pass_estimate_measured.json` (gồm cả tải, trích, ASR và caption).
+    - Ô 1b in ước lượng theo số đo của mọi tar đã xong.
+25. Đánh giá:
+    - 5.2 (`eval_5_2_htstep_<split>.json`) và 5.4a chạy theo từng split, với split train chỉ tính phần đã có caption, ghi
+      `complete`.
+    - T7 báo theo từng split (`T7`, `T7_train`); kết luận vẫn dùng T7 của val.
+    - Ô 11 xuất `htstep_<split>_{pseudo,headline}.json` (subset `training`/`validation`, kèm `complete`), chạy được khi split
+      chưa xong.
+
+Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pseudocap/`); các thay đổi v4 ghi ở đây.
+
 2026-10-27 (sau): metadata không upload nữa: ô 1 clone/pull `github.com/chien24/pseudocap` (public) vào `/content/pseudocap`, đọc `metadata/` từ đó; protocol ghi thêm `pseudocap_commit`; `verify_protocol` kiểm sha256 metadata không đổi sau khi khóa. Commit `dcde5bb`.

@@ -2,14 +2,15 @@
 
 Run last (after build_manifest, check_availability, yc2_style_stats): python -I -X utf8 tools/write_upload.py
 """
+import gzip
 import hashlib
 import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 META = ROOT / "metadata"
-FILES = ["manifest.jsonl", "yc2_train_text.jsonl", "yc2_dev_val_split.json", "availability.csv", "tar_index.csv",
-         "tar_index_tars.json", "yc2_stats.json"]
+FILES = ["manifest.jsonl", "manifest_htstep_train.jsonl.gz", "yc2_train_text.jsonl", "yc2_dev_val_split.json",
+         "availability.csv", "tar_index.csv", "tar_index_tars.json", "tar_order.txt", "yc2_stats.json"]
 DRIVE = "MyDrive/Colab Notebooks/code KL/Fushion/htstep_cap"     # same root as the UEMR notebooks (.../code KL/Fushion/uemr)
 
 
@@ -17,7 +18,8 @@ def main():
     counts = {}
     for f in FILES:
         b = (META / f).read_bytes()
-        counts[f] = [b.decode("utf-8").count("\n") + (not b.endswith(b"\n")), hashlib.sha256(b).hexdigest()]
+        t = gzip.decompress(b) if f.endswith(".gz") else b              # .gz: số dòng sau giải nén, sha256 của file nén
+        counts[f] = [t.decode("utf-8").count("\n") + (not t.endswith(b"\n")), hashlib.sha256(b).hexdigest()]
     lines = [
         "# Metadata cho notebook",
         "",

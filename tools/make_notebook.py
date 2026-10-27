@@ -34,7 +34,10 @@ bị khóa `STALE_HOURS` giờ (đặt `STALE_HOURS = 0` ở ô 0 nếu chắc k
 
 1. Phiên 1: `RUN_EXTRACT`, `RUN_ASR`, `RUN_SPEED`, `RUN_DEV_GRID` = True → ô 6 in sha256 của protocol.
 2. Tải `htstep_cap_protocol.json` về `pseudocap/configs/` (commit + push), dán sha256 vào `PROTOCOL_SHA256`.
-3. Phiên 2: tắt 4 cờ trên, bật `RUN_YC2_VAL`, `RUN_HTSTEP_VAL`, `RUN_EVAL`, `RUN_JUDGE`.
+3. Phiên 2: tắt 4 cờ trên, bật `RUN_YC2_VAL`, `RUN_HTSTEP_VAL`, `RUN_EVAL`, `RUN_JUDGE` → ô 7, 8, 9a–9e, 10, 11.
+4. Phiên 3 trở đi (lượt full, HT-Step train): chỉ bật `RUN_FULL_PASS`, chạy 0 → 8b. Ô 8b chỉ chạy khi protocol khóa, caption
+   HT-Step val đủ và T4 (ô 9b), T6 (ô 9e) đã có trong `results/`; T4/T6 trượt thì dừng trừ khi `FORCE_FULL_PASS = True`.
+   Mỗi session làm tiếp các tar chưa done (`MAX_TARS_THIS_SESSION` để giới hạn). Ô 11 xuất được khi split chưa xong.
 
 Mỗi ô in `CHECK ... OK/FAIL`; `FAIL` dừng ô bằng exception.
 ''')
@@ -72,6 +75,9 @@ RUN_YC2_VAL    = False    # chỉ bật sau khi đã điền PROTOCOL_SHA256
 RUN_HTSTEP_VAL = False
 RUN_EVAL       = False
 RUN_JUDGE      = False
+RUN_FULL_PASS  = False    # ô 8b: HT-Step ngoài tar val (train). Cổng: protocol khóa + caption HT-Step val xong + T4, T6 đã tính
+FORCE_FULL_PASS = False   # True: chạy ô 8b dù T4/T6 trượt
+MAX_TARS_THIS_SESSION = None   # số tar 'full' tối đa mỗi session (None = không giới hạn)
 PROTOCOL_SHA256 = ''      # dán sha256 mà ô 6 in ra
 
 GEN_MODELS   = {'q7b4': ('Qwen/Qwen2.5-VL-7B-Instruct', True),    # 4-bit NF4, fp16 compute
@@ -124,8 +130,8 @@ def videos_done():
     p = f'{PROGRESS}/videos_done.txt'
     return set(open(p, encoding='utf-8').read().split()) if os.path.exists(p) else set()
 
-def mark_video_done(ds, vid):
-    d = videos_done() | {f'{ds}/{vid}'}
+def mark_video_done(ds, *vids):
+    d = videos_done() | {f'{ds}/{v}' for v in vids}
     write_text(f'{PROGRESS}/videos_done.txt', ''.join(x + '\n' for x in sorted(d)))
 
 def failed_rows():
@@ -165,6 +171,19 @@ def sha256_file(p):
 def free():
     import torch
     gc.collect(); torch.cuda.empty_cache()
+
+def gpu_used_gb():
+    """VRAM đang dùng của cả GPU (gồm cả ctranslate2/faster-whisper, torch không thấy)."""
+    import torch
+    f, t = torch.cuda.mem_get_info()
+    return (t - f) / 2**30
+
+def load_caps(name):
+    return {r['key']: r for r in read_jsonl(f'{BASE}/captions/{name}.jsonl')}
+
+def load_res(n):
+    p = f'{BASE}/results/{n}.json'
+    return json.load(open(p, encoding='utf-8')) if os.path.exists(p) else None
 
 def boot_ci(vals, vids, n=N_BOOT, seed=SEED):
     """Trung bình theo segment, CI 95% bằng bootstrap theo video (seed cố định). So cặp: truyền hiệu từng segment."""
@@ -220,6 +239,7 @@ print('ô 0 xong')
 
 code(r'''
 # ô 1. Mount Drive, clone/pull repo pseudocap lấy metadata, kiểm khớp UPLOAD.md
+import gzip
 from google.colab import drive
 drive.mount('/content/drive')
 if os.path.isdir(f'{REPO_DIR}/.git'):
@@ -232,21 +252,27 @@ for d in ['cache/frames/yc2', 'cache/frames/htstep', 'cache/audio/yc2', 'cache/a
           'cache/info/htstep', 'progress', 'asr/yc2', 'asr/htstep', 'captions/dev_grid', 'judge', 'results', 'export']:
     os.makedirs(f'{BASE}/{d}', exist_ok=True)
 
+def open_meta(name):
+    p = f'{META}/{name}'
+    return gzip.open(p, 'rt', encoding='utf-8') if p.endswith('.gz') else open(p, encoding='utf-8')
+
 COUNTS = json.loads(re.search(r'<!-- COUNTS (\{.*?\}) -->', open(f'{META}/UPLOAD.md', encoding='utf-8').read(), re.S).group(1))
 for name, (n, sha) in COUNTS.items():
-    p = f'{META}/{name}'
-    lines = sum(1 for _ in open(p, encoding='utf-8'))
+    with open_meta(name) as f:
+        lines = sum(1 for _ in f)
     check(f'{name} lines', lines == n, f'{lines} vs UPLOAD.md {n}')
-    check(f'{name} sha256', sha256_file(p) == sha)
+    check(f'{name} sha256', sha256_file(f'{META}/{name}') == sha)
 
-MAN = read_jsonl(f'{META}/manifest.jsonl')
+# manifest.jsonl = YC2 dev/val + HT-Step val; HT-Step train cùng schema nằm ở file gzip riêng (giới hạn 100 MB/file của GitHub)
+with open_meta('manifest_htstep_train.jsonl.gz') as f:
+    MAN = read_jsonl(f'{META}/manifest.jsonl') + [json.loads(l) for l in f if l.strip()]
 SPLIT = json.load(open(f'{META}/yc2_dev_val_split.json', encoding='utf-8'))
 STATS = json.load(open(f'{META}/yc2_stats.json', encoding='utf-8'))
 TRAIN_TEXT = read_jsonl(f'{META}/yc2_train_text.jsonl')
 MED, P90 = STATS['words']['median'], STATS['words']['p90']
 DEVVAL = set(SPLIT['dev']) | set(SPLIT['val'])
 cnt = Counter(f"{r['dataset']}/{r['split']}" for r in MAN)
-check('manifest splits', cnt == {'yc2/dev': 773, 'yc2/val': 3030, 'htstep/val': 3441}, str(dict(cnt)))
+check('manifest splits', cnt == {'yc2/dev': 773, 'yc2/val': 3030, 'htstep/val': 3441, 'htstep/train': 103293}, str(dict(cnt)))
 check('yc2 train text disjoint from dev/val', not ({r['video_id'] for r in TRAIN_TEXT} & DEVVAL))
 
 # YC2: local chỉ kiểm bằng bản sao trên máy, ở đây kiểm lại từng file trên Drive
@@ -260,7 +286,9 @@ check('yc2 video folder on Drive', len(miss) < len(yc2_vids), YC2_VIDEOS)
 ROWS = [r for r in MAN if r['has_video']]
 for k in sorted(cnt):
     n_ok = sum(f"{r['dataset']}/{r['split']}" == k for r in ROWS)
-    print(f'  {k}: có video {n_ok}/{cnt[k]} segment ({n_ok / cnt[k]:.1%})')
+    nv = len({r['video_id'] for r in MAN if f"{r['dataset']}/{r['split']}" == k})
+    nv_ok = len({r['video_id'] for r in ROWS if f"{r['dataset']}/{r['split']}" == k})
+    print(f'  {k}: có video {nv_ok}/{nv} video ({nv_ok / nv:.1%}), {n_ok}/{cnt[k]} segment ({n_ok / cnt[k]:.1%})')
 
 # HT-Step: video -> (tar, member, offset, size) từ tar_index.csv (header tar đọc ở local, revision ghim)
 TARS_META = json.load(open(f'{META}/tar_index_tars.json', encoding='utf-8'))
@@ -270,9 +298,24 @@ VIDX = {r['video_id']: {**r, 'offset_data': int(r['offset_data']), 'size': int(r
         for r in csv.DictReader(open(f'{META}/tar_index.csv', encoding='utf-8'))
         if HT_TAR_OF.get(r['video_id']) == r['tar_path']}
 check('every HT-Step video with has_video is in tar_index', set(VIDX) == set(HT_TAR_OF), f'{len(VIDX)}/{len(HT_TAR_OF)}')
-HT_TARS = sorted({v['tar_path'] for v in VIDX.values()})
-print(f'HT-Step: {len(VIDX)} video trong {len(HT_TARS)} tar (revision {HF_REV[:8]}), '
-      f'tar {sum(TARS_META["tars"][t]["size"] for t in HT_TARS) / 1e9:.1f} GB, video cần {sum(v["size"] for v in VIDX.values()) / 1e9:.1f} GB')
+
+# Hai chế độ tar: 'extract' (tar có video val, ô 3: frame/audio cache lên Drive) và 'full' (tar còn lại, ô 8b: một lượt
+# tải -> ASR -> caption, không lưu frame/audio). Thứ tự theo tar_order.txt: tar val trước.
+with open_meta('tar_order.txt') as f:
+    TAR_ORDER = f.read().split()
+VAL_VIDS = {r['video_id'] for r in ROWS if r['dataset'] == 'htstep' and r['split'] == 'val'}
+EXTRACT_TARS = [t for t in TAR_ORDER if t in {VIDX[v]['tar_path'] for v in VAL_VIDS}]
+FULL_TARS = [t for t in TAR_ORDER if t not in EXTRACT_TARS and t in {x['tar_path'] for x in VIDX.values()}]
+check('tar_order: extract tars first', TAR_ORDER[:len(EXTRACT_TARS)] == EXTRACT_TARS)
+FULL_VIDS = {v for v, x in VIDX.items() if x['tar_path'] in set(FULL_TARS)}
+EX_ROWS = [r for r in ROWS if r['dataset'] == 'yc2' or r['split'] == 'val']                  # ô 3–9
+FULL_ROWS = [r for r in ROWS if r['dataset'] == 'htstep' and r['video_id'] in FULL_VIDS]       # ô 8b
+HT_SPLITS = ['val'] + sorted({r['split'] for r in ROWS if r['dataset'] == 'htstep'} - {'val'})
+gap = [v for v, x in VIDX.items() if x['tar_path'] in EXTRACT_TARS and v not in VAL_VIDS]
+print(f'tar extract: {len(EXTRACT_TARS)} ({len(VAL_VIDS)} video val) | tar full: {len(FULL_TARS)} '
+      f'({len(FULL_VIDS)} video, {len(FULL_ROWS)} segment, split {sorted({r["split"] for r in FULL_ROWS})})')
+print(f'video không phải val nằm trong tar extract (không vào lượt full): {len(gap)}, '
+      f'{sum(r["video_id"] in set(gap) for r in ROWS)} segment')
 ''')
 
 code(r'''
@@ -280,23 +323,33 @@ code(r'''
 def progress_report():
     vd, fs, tars = videos_done(), failed_set(), load_tars()
     print(f"=== tiến trình {time.strftime('%H:%M:%S')} | session {SESSION_ID} | đĩa /content trống {gb_free():.1f} GB")
-    st = Counter(tars.get(t, {}).get('status', 'pending') for t in HT_TARS)
-    print(f"tar HT-Step: done {st['done']} / in_progress {st['in_progress']} / pending {st['pending']} (tổng {len(HT_TARS)})")
-    for t in HT_TARS:
-        x = tars.get(t)
-        if x and x.get('status') != 'done':
-            print(f"   {t}: {x['status']} session {x.get('session_id')} {(time.time() - x['updated_at']) / 60:.0f} phút trước"
-                  f"{' lỗi: ' + x['error'][:100] if x.get('error') else ''}")
-    for ds in ('yc2', 'htstep'):
-        vids = {r['video_id'] for r in ROWS if r['dataset'] == ds}
+    for mode, tl in (('extract', EXTRACT_TARS), ('full', FULL_TARS)):
+        st = Counter(tars.get(t, {}).get('status', 'pending') for t in tl)
+        print(f"tar {mode:7}: done {st['done']} / in_progress {st['in_progress']} / pending {st['pending']} (tổng {len(tl)})")
+        for t in tl:
+            x = tars.get(t)
+            if x and x.get('status') != 'done':
+                print(f"   {t}: {x['status']} session {x.get('session_id')} {(time.time() - x['updated_at']) / 60:.0f} phút trước"
+                      f"{' lỗi: ' + x['error'][:100] if x.get('error') else ''}")
+        timed = [tars[t] for t in tl if tars.get(t, {}).get('status') == 'done' and tars[t].get('segments')]
+        if timed:
+            s = sum(x['seconds'] for x in timed) / sum(x['segments'] for x in timed)
+            left = sum(1 for r in FULL_ROWS if tars.get(VIDX[r['video_id']]['tar_path'], {}).get('status') != 'done')
+            print(f"   đo thật: {s:.1f} s/segment, {len(timed)} tar; còn {left} segment ≈ {left * s / 3600:.1f} giờ GPU; "
+                  f"VRAM tối đa {max(x.get('vram_gb', 0) for x in timed):.1f} GB")
+    asr_have = {ds: {p[:-5] for p in os.listdir(f'{BASE}/asr/{ds}')} for ds in ('yc2', 'htstep')}
+    scopes = [('yc2', 'dev', None), ('yc2', 'val', None), ('htstep', 'val', None)] + \
+             [('htstep', s, FULL_VIDS) for s in HT_SPLITS if s != 'val']
+    for ds, split, only in scopes:
+        vids = {r['video_id'] for r in ROWS if r['dataset'] == ds and r['split'] == split and (only is None or r['video_id'] in only)}
         d, f = sum(f'{ds}/{v}' in vd for v in vids), sum(f'{ds}/{v}' in fs for v in vids)
-        n_asr = sum(os.path.exists(f'{BASE}/asr/{ds}/{v}.json') for v in vids)
-        print(f'video {ds:6}: trích xong {d}/{len(vids)} | lỗi {f} | còn {len(vids) - d - f} | ASR xong {n_asr}')
+        print(f'video {ds}/{split:5}: xong {d}/{len(vids)} | lỗi {f} | còn {len(vids) - d - f} | ASR {len(vids & asr_have[ds])}')
     want = {'dev_grid': 773, 'yc2_val': sum(r['dataset'] == 'yc2' and r['split'] == 'val' for r in ROWS),
-            'htstep_val': sum(r['dataset'] == 'htstep' for r in ROWS)}
+            **{f'htstep_{s}': sum(r['dataset'] == 'htstep' and r['split'] == s for r in (EX_ROWS if s == 'val' else FULL_ROWS))
+               for s in HT_SPLITS}}
     for p in sorted(Path(f'{BASE}/captions').rglob('*.jsonl')):
-        n = sum(1 for _ in open(p, encoding='utf-8'))
-        print(f"caption {p.relative_to(f'{BASE}/captions')}: {n}/{want['dev_grid' if 'dev_grid' in str(p) else p.stem]}")
+        n, w = sum(1 for _ in open(p, encoding='utf-8')), want.get('dev_grid' if 'dev_grid' in str(p) else p.stem)
+        print(f"caption {p.relative_to(f'{BASE}/captions')}: {n}/{w}" + (f' ({n / w:.1%})' if w else ''))
     for p in sorted(Path(f'{BASE}/judge').glob('*.jsonl')):
         print(f'judge {p.name}: {sum(1 for _ in open(p, encoding="utf-8"))}')
     pp = f'{BASE}/htstep_cap_protocol.json'
@@ -353,8 +406,9 @@ check('models resolvable', any(REV.values()) and JUDGE and VIS and TXT)
 ''')
 
 code(r'''
-# ô 3. Trích 8 frame/segment + audio cả video. YC2: đọc từ Drive. HT-Step: từng tar từ HF (tải -> trích -> xóa), tiến trình
-#      trên Drive (progress/tars.json, videos_done.txt, failed.csv). Chạy lại ở session mới sẽ tiếp tục từ chỗ dừng.
+# ô 3. Trích 8 frame/segment + audio cả video, mode 'extract'. YC2: đọc từ Drive. HT-Step val: từng tar từ HF (tải -> trích
+#      -> xóa), tiến trình trên Drive (progress/tars.json, videos_done.txt, failed.csv). Chạy lại ở session mới sẽ tiếp tục.
+#      Hàm trong ô này (extract_video, claim_tar, fetch_videos) dùng lại ở ô 8b.
 import cv2, requests
 from huggingface_hub import hf_hub_download, hf_hub_url
 
@@ -365,7 +419,9 @@ for p in Path(f'{BASE}/cache/done').glob('*/*.json'):     # dấu done của b�
     if f'{p.parent.name}/{p.stem}' not in videos_done():
         mark_video_done(p.parent.name, p.stem)
 
-def extract_video(path, ds, vid, segs):
+def extract_video(path, ds, vid, segs, save=True):
+    """Frame vào LOCAL/frames, audio vào LOCAL/audio. save=True (mode extract): copy lên Drive + đánh dấu done.
+    save=False (mode full): để lại ở /content cho ASR + caption, người gọi xóa và đánh dấu done."""
     cap = cv2.VideoCapture(path)
     fps, nfr = cap.get(cv2.CAP_PROP_FPS), cap.get(cv2.CAP_PROP_FRAME_COUNT)
     dur = nfr / fps if fps > 0 and nfr > 0 else None
@@ -393,6 +449,8 @@ def extract_video(path, ds, vid, segs):
     res = subprocess.run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', path, '-vn', '-ac', '1', '-ar', '16000',
                           '-c:a', 'libopus', '-b:a', '32k', aud], capture_output=True, text=True)
     has_audio = res.returncode == 0 and os.path.exists(aud)
+    if not save:
+        return
     # mọi thứ ghi ở /content trước, xong cả video mới copy lên Drive; Drive chậm với nhiều file nhỏ nên frame = 1 tar/video
     tmp = f'{LOCAL}/{vid}.tar'
     with tarfile.open(tmp, 'w') as t:
@@ -406,7 +464,7 @@ def extract_video(path, ds, vid, segs):
     mark_video_done(ds, vid)
 
 def process(path, ds, vid, src):
-    """Trích một video rồi xóa file video; lỗi thì ghi failed.csv, không dừng notebook."""
+    """Trích một video (mode extract) rồi xóa file video; lỗi thì ghi failed.csv, không dừng notebook."""
     try:
         extract_video(path, ds, vid, BY_VID[(ds, vid)])
     except Exception as e:
@@ -441,9 +499,55 @@ def range_get(tar, off, size, out):
                 raise
             time.sleep(5 * 2 ** attempt)
 
+def claim_tar(tar, mode):
+    """False nếu tar đã done hoặc đang được session khác làm (mới hơn STALE_HOURS); không thì đánh dấu in_progress."""
+    st = load_tars().get(tar, {})
+    if st.get('status') == 'done':
+        return False
+    age_h = (time.time() - st.get('updated_at', 0)) / 3600
+    if st.get('status') == 'in_progress' and st.get('session_id') != SESSION_ID and age_h < STALE_HOURS:
+        print(f"  bỏ qua {tar}: session {st['session_id']} đang làm ({age_h * 60:.0f} phút trước; xem STALE_HOURS ở ô 0)")
+        return False
+    set_tar(tar, status='in_progress', mode=mode, session_id=SESSION_ID, error=None)
+    return True
+
+def fetch_videos(tar, vids, work, how):
+    """yield (video_id, đường dẫn video trong work/); how='tar' tải cả tar, 'range' đọc từng video. Người gọi xóa video."""
+    if how == 'tar':
+        need_disk((TARS_META['tars'][tar]['size'] + max(VIDX[v]['size'] for v in vids)) / 2**30, tar)
+        p = hf_hub_download(HF_REPO, tar, repo_type='dataset', revision=HF_REV, local_dir=work, token=HF_TOKEN)
+        with tarfile.open(p) as t:
+            for v in tqdm(vids, desc=f'  {Path(tar).stem} video', leave=False):
+                try:
+                    m = t.getmember(VIDX[v]['member_name'])
+                except KeyError:
+                    log_failed('htstep', v, tar, 'member not in tar')
+                    continue
+                t.extract(m, f'{work}/v', filter='data')
+                yield v, f'{work}/v/{m.name}'
+    else:
+        for v in tqdm(vids, desc=f'  {Path(tar).stem} video (range)', leave=False):
+            need_disk(VIDX[v]['size'] / 2**30, v)
+            out = f'{work}/{v}.mp4'
+            try:
+                range_get(tar, VIDX[v]['offset_data'], VIDX[v]['size'], out)
+            except Exception as e:
+                log_failed('htstep', v, tar, f'range read: {e}')
+                continue
+            yield v, out
+
+def tar_mode(tar, vids):
+    """'auto': extract -> range nếu tar > 3x dung lượng video cần; full -> range nếu tar có < 20% số video cần dùng."""
+    if FETCH_MODE != 'auto':
+        return FETCH_MODE
+    if tar in EXTRACT_TARS:
+        return 'range' if TARS_META['tars'][tar]['size'] > 3 * sum(VIDX[v]['size'] for v in vids) else 'tar'
+    return 'range' if len(vids) < 0.2 * TARS_META['tars'][tar]['n_members'] else 'tar'
+
 BY_VID = defaultdict(list)
-for r in ROWS:
+for r in EX_ROWS:
     BY_VID[(r['dataset'], r['video_id'])].append(r)
+VAL_BY_TAR = {t: sorted(v for v in VAL_VIDS if VIDX[v]['tar_path'] == t) for t in EXTRACT_TARS}
 
 if RUN_EXTRACT:
     print('--- ô 3 bắt đầu'); progress_report()
@@ -459,49 +563,21 @@ if RUN_EXTRACT:
             continue
         process(tmp, 'yc2', vid, src)
 
-    def tar_mode(tar):
-        need = sum(x['size'] for x in VIDX.values() if x['tar_path'] == tar)
-        return FETCH_MODE if FETCH_MODE != 'auto' else ('range' if TARS_META['tars'][tar]['size'] > 3 * need else 'tar')
-    print('HT-Step chế độ:', {Path(t).stem: tar_mode(t) for t in HT_TARS})
-    bar = tqdm(HT_TARS, desc='HT-Step tar')
+    print('HT-Step val, chế độ:', {Path(t).stem: tar_mode(t, VAL_BY_TAR[t]) for t in EXTRACT_TARS})
+    bar = tqdm(EXTRACT_TARS, desc='HT-Step tar (extract)')
     for tar in bar:
         bar.set_postfix_str(Path(tar).stem)
-        st = load_tars().get(tar, {})
-        if st.get('status') == 'done':
+        if not claim_tar(tar, 'extract'):
             continue
-        age_h = (time.time() - st.get('updated_at', 0)) / 3600
-        if st.get('status') == 'in_progress' and st.get('session_id') != SESSION_ID and age_h < STALE_HOURS:
-            print(f"  bỏ qua {tar}: session {st['session_id']} đang làm ({age_h * 60:.0f} phút trước; xem STALE_HOURS ở ô 0)")
-            continue
-        set_tar(tar, status='in_progress', session_id=SESSION_ID, error=None)
         skip = videos_done() | failed_set()
-        mine = sorted(v for v, x in VIDX.items() if x['tar_path'] == tar)
+        mine = VAL_BY_TAR[tar]
         vids = [v for v in mine if f'htstep/{v}' not in skip]
-        work, mode = f'{TMP}/{Path(tar).stem}', tar_mode(tar)
+        work = f'{TMP}/{Path(tar).stem}'
         os.makedirs(work, exist_ok=True)
         try:
-            if vids and mode == 'tar':
-                need_disk((TARS_META['tars'][tar]['size'] + max(VIDX[v]['size'] for v in vids)) / 2**30, tar)
-                p = hf_hub_download(HF_REPO, tar, repo_type='dataset', revision=HF_REV, local_dir=work, token=HF_TOKEN)
-                with tarfile.open(p) as t:
-                    for v in tqdm(vids, desc=f'  {Path(tar).stem} video', leave=False):
-                        try:
-                            m = t.getmember(VIDX[v]['member_name'])
-                        except KeyError:
-                            log_failed('htstep', v, tar, 'member not in tar')
-                            continue
-                        t.extract(m, f'{work}/v', filter='data')
-                        process(f'{work}/v/{m.name}', 'htstep', v, tar)
-            elif vids:
-                for v in tqdm(vids, desc=f'  {Path(tar).stem} video (range)', leave=False):
-                    need_disk(VIDX[v]['size'] / 2**30, v)
-                    out = f'{work}/{v}.mp4'
-                    try:
-                        range_get(tar, VIDX[v]['offset_data'], VIDX[v]['size'], out)
-                    except Exception as e:
-                        log_failed('htstep', v, tar, f'range read: {e}')
-                        continue
-                    process(out, 'htstep', v, tar)
+            if vids:
+                for v, path in fetch_videos(tar, vids, work, tar_mode(tar, mine)):
+                    process(path, 'htstep', v, tar)
         except RuntimeError:                          # CHECK FAIL (thiếu đĩa): dừng và báo
             set_tar(tar, status='pending', error='thiếu đĩa')
             raise
@@ -513,13 +589,13 @@ if RUN_EXTRACT:
             shutil.rmtree(work, ignore_errors=True)   # xóa tar + video giải nén, kể cả khi có lỗi
             check(f'{Path(tar).stem}: tar/video tạm đã xóa', not os.path.exists(work))
         vd, fs = videos_done(), failed_set()
-        set_tar(tar, status='done', session_id=SESSION_ID, n_ok=sum(f'htstep/{v}' in vd for v in mine),
+        set_tar(tar, status='done', mode='extract', session_id=SESSION_ID, n_ok=sum(f'htstep/{v}' in vd for v in mine),
                 n_fail=sum(f'htstep/{v}' in fs for v in mine))
     print('--- ô 3 kết thúc'); progress_report()
 
 finished = videos_done() | failed_set()
 left = [k for k in BY_VID if f'{k[0]}/{k[1]}' not in finished]
-READY = restore_frames(ROWS)
+READY = restore_frames(EX_ROWS)
 print('segment có frame:', dict(Counter(f"{r['dataset']}/{r['split']}" for r in READY)))
 if RUN_EXTRACT:
     check('every video done or logged as failed', not left, f'{len(left)} video chưa xử lý: chạy lại ô 3')
@@ -527,39 +603,49 @@ check('frames ready', len(READY) > 0)
 ''')
 
 code(r'''
-# ô 4. ASR cho mọi video đã trích (cache asr/<dataset>/<video_id>.json, timestamp từng từ). Cùng một ASR cho YC2 và HT-Step.
-READY_VIDS = sorted({(r['dataset'], r['video_id']) for r in READY})
-if RUN_ASR:
+# ô 4. ASR cho mọi video đã trích (cache asr/<dataset>/<video_id>.json, timestamp từng từ). Cùng một ASR cho YC2 và HT-Step;
+#      load_asr/transcribe dùng lại ở ô 8b (cùng model, cùng tham số).
+def load_asr(names=ASR_MODELS):
     from faster_whisper import WhisperModel, BatchedInferencePipeline
-    wm = None
-    for ASR_NAME in ASR_MODELS:
+    for name in names:
         try:
-            wm = WhisperModel(ASR_NAME, device='cuda', compute_type='float16')
-            break
+            return name, BatchedInferencePipeline(model=WhisperModel(name, device='cuda', compute_type='float16'))
         except Exception as e:
-            print('ASR không tải được', ASR_NAME, e)
-    check('asr model loaded', wm is not None, ASR_NAME)
+            print('ASR không tải được', name, e)
+    return None, None
+
+def transcribe(pipe, name, aud):
+    """-> (json ghi vào asr/, số giây audio). Không có audio: words rỗng."""
+    if not os.path.exists(aud):
+        return {'model': name, 'language': None, 'words': [], 'note': 'no audio stream'}, 0.0
+    segs, info = pipe.transcribe(aud, batch_size=16, word_timestamps=True)
+    words = [[round(w.start, 2), round(w.end, 2), w.word.strip()] for s in segs for w in (s.words or [])]
+    return {'model': name, 'language': info.language, 'language_probability': round(info.language_probability, 3),
+            'words': words}, info.duration
+
+READY_VIDS = sorted({(r['dataset'], r['video_id']) for r in READY})
+ASR_SPEED_PATH = f'{BASE}/results/asr_speed.json'
+if RUN_ASR:
+    ASR_NAME, pipe = load_asr()
+    check('asr model loaded', pipe is not None, str(ASR_NAME))
     prev = {json.load(open(f'{BASE}/asr/{ds}/{v}.json'))['model'] for ds, v in READY_VIDS
             if os.path.exists(f'{BASE}/asr/{ds}/{v}.json')}
     check('same ASR model as cached files', prev <= {ASR_NAME}, str(prev))
-    pipe = BatchedInferencePipeline(model=wm)
-    t0, n_audio_s = time.time(), 0.0
+    t0, n_audio_s, vram = time.time(), 0.0, 0.0
     todo = [k for k in READY_VIDS if not os.path.exists(f'{BASE}/asr/{k[0]}/{k[1]}.json')]
     print(f'ASR: {len(READY_VIDS) - len(todo)} video đã có, còn {len(todo)}')
     bar = tqdm(todo, desc='ASR video')
     for ds, vid in bar:
-        out = f'{BASE}/asr/{ds}/{vid}.json'
-        aud = f'{BASE}/cache/audio/{ds}/{vid}.opus'
-        if not os.path.exists(aud):
-            write_json(out, {'model': ASR_NAME, 'language': None, 'words': [], 'note': 'no audio stream'})
-            continue
-        segs, info = pipe.transcribe(aud, batch_size=16, word_timestamps=True)
-        words = [[round(w.start, 2), round(w.end, 2), w.word.strip()] for s in segs for w in (s.words or [])]
-        write_json(out, {'model': ASR_NAME, 'language': info.language,
-                         'language_probability': round(info.language_probability, 3), 'words': words})
-        n_audio_s += info.duration
+        res, dur = transcribe(pipe, ASR_NAME, f'{BASE}/cache/audio/{ds}/{vid}.opus')
+        write_json(f'{BASE}/asr/{ds}/{vid}.json', res)
+        n_audio_s += dur
+        vram = max(vram, gpu_used_gb())
         bar.set_postfix_str(f'{n_audio_s / max(time.time() - t0, 1):.0f}x realtime')
-    wm = pipe = None
+    if n_audio_s > 60:                                 # tốc độ + VRAM để ước lượng lượt full (ô 5, ô 8b)
+        write_json(ASR_SPEED_PATH, {'model': ASR_NAME, 'audio_s': round(n_audio_s), 'wall_s': round(time.time() - t0),
+                                    'realtime_x': round(n_audio_s / (time.time() - t0), 1), 'gpu_used_gb': round(vram, 2)})
+        print('ASR:', json.load(open(ASR_SPEED_PATH)))
+    pipe = None
     free()
 
 asr = {k: json.load(open(f'{BASE}/asr/{k[0]}/{k[1]}.json', encoding='utf-8')) for k in READY_VIDS
@@ -712,6 +798,16 @@ if RUN_SPEED:
 else:
     SPEED = json.load(open(SPEED_PATH)) if os.path.exists(SPEED_PATH) else {}
     print('SKIP speed; đọc lại', SPEED)
+
+# Ước lượng giờ GPU cho lượt full (ô 8b) từ số video/segment thật trong manifest (chưa tính tải tar + trích frame;
+# đo bằng P2 không anchor). Ô 8b in lại ước lượng bằng số đo thật sau tar 'full' đầu tiên.
+ASP = json.load(open(ASR_SPEED_PATH)) if os.path.exists(ASR_SPEED_PATH) else {}
+full_audio_h = sum({r['video_id']: r['duration'] for r in FULL_ROWS}.values()) / 3600
+FULL_EST = {'videos': len(FULL_VIDS), 'segments': len(FULL_ROWS), 'audio_hours': round(full_audio_h, 1),
+            'asr_gpu_hours': round(full_audio_h / ASP['realtime_x'], 1) if ASP.get('realtime_x') else None,
+            'caption_gpu_hours': {c: round(len(FULL_ROWS) / s['seg_per_h_P2'], 1) for c, s in SPEED.items() if s}}
+print('Lượt full (ô 8b), giờ GPU ước lượng:', FULL_EST)
+write_json(f'{BASE}/results/full_pass_estimate.json', FULL_EST)
 ''')
 
 code(r'''
@@ -843,6 +939,177 @@ else:
     print('SKIP htstep val:', len(read_jsonl(f'{BASE}/captions/htstep_val.jsonl')), 'caption đã có')
 ''')
 
+code(r'''
+# ô 8b. Lượt 'full': HT-Step ngoài tar val (train). Mỗi tar một lượt: tải -> frame + audio ở /content -> ASR (asr/htstep/ trên
+#       Drive) -> caption mọi segment bằng cấu hình đã khóa + anchor (captions/htstep_<split>.jsonl) -> xóa frame/audio ->
+#       videos_done -> tar done. Không lưu frame/audio lên Drive. Cổng: protocol khóa, caption HT-Step val xong, T4 + T6 đã tính.
+FULL_BY_VID = defaultdict(list)
+for r in FULL_ROWS:
+    FULL_BY_VID[r['video_id']].append(r)
+FULL_BY_TAR = {t: sorted(v for v in FULL_VIDS if VIDX[v]['tar_path'] == t) for t in FULL_TARS}
+
+def full_gate():
+    """-> (thiếu điều kiện, tiêu chí trượt). Trượt = cả đầu CI thuận lợi vẫn không đạt ngưỡng."""
+    missing, fails = [], []
+    caps = load_caps('htstep_val')
+    if not HT_VAL or not all(r['key'] in caps for r in HT_VAL):
+        missing.append(f'caption HT-Step val chưa xong ({len(caps)}/{len(HT_VAL)}, ô 8)')
+    r52, r54b = load_res('eval_5_2_htstep_val'), load_res('eval_5_4b_judge')
+    if not r52:
+        missing.append('T4 chưa tính (ô 9b)')
+    else:
+        t4 = r52['systems']['pseudo']
+        print(f"  T4 acc@1 HT-Step val {fmt(t4)} (ngưỡng {CRITERIA['T4_step_acc1']:.2f})")
+        if t4['hi'] < CRITERIA['T4_step_acc1']:
+            fails.append(f"T4: cận trên CI {t4['hi']:.3f} < {CRITERIA['T4_step_acc1']}")
+    if not r54b:
+        missing.append('T6 chưa tính (ô 9e)')
+    else:
+        s = r54b['sets']
+        t1 = s['cal_gt']['mean'] >= CRITERIA['T1_judge_pass_gt'] and s['cal_corrupt']['mean'] >= CRITERIA['T1_judge_catch_corrupt']
+        t6 = s['htstep_val_pseudo']
+        print(f"  T6 unsupported HT-Step val {fmt(t6)} (ngưỡng <= {CRITERIA['T6_unsupported_max']:.2f}), T1 {'đạt' if t1 else 'trượt'}")
+        if not t1:
+            print('  T1 trượt -> T6 = N/A (giám khảo không tin được), không chặn')
+        elif t6['lo'] > CRITERIA['T6_unsupported_max']:
+            fails.append(f"T6: cận dưới CI {t6['lo']:.3f} > {CRITERIA['T6_unsupported_max']}")
+    return missing, fails
+
+def drop_local(v):
+    shutil.rmtree(f'{LOCAL}/frames/htstep/{v}', ignore_errors=True)
+    if os.path.exists(f'{LOCAL}/audio/htstep/{v}.opus'):
+        os.remove(f'{LOCAL}/audio/htstep/{v}.opus')
+
+def full_estimate(sec_per_seg, note):
+    fin = videos_done() | failed_set()
+    left = [r for r in FULL_ROWS if f"htstep/{r['video_id']}" not in fin]
+    est = {'note': note, 'sec_per_segment': round(sec_per_seg, 2), 'segments_left': len(left),
+           'gpu_hours_left': round(len(left) * sec_per_seg / 3600, 1), 'at': time.strftime('%Y-%m-%d %H:%M')}
+    print('ƯỚC LƯỢNG lượt full:', est)
+    write_json(f'{BASE}/results/full_pass_estimate_measured.json', est)
+
+def run_full_pass(PROTO, PSHA):
+    g = PROTO['gen']
+    sp, asp = SPEED.get(g['code']) or {}, (json.load(open(ASR_SPEED_PATH)) if os.path.exists(ASR_SPEED_PATH) else {})
+    total = torch.cuda.get_device_properties(0).total_memory / 2**30
+    keep_both = bool(sp.get('peak_vram_gb') and asp.get('gpu_used_gb')) and sp['peak_vram_gb'] + asp['gpu_used_gb'] + 1.0 < total
+    print(f"VRAM: model sinh ~{sp.get('peak_vram_gb')} GB + ASR ~{asp.get('gpu_used_gb')} GB / {total:.1f} GB -> "
+          f"{'giữ cả hai' if keep_both else 'nạp lần lượt trong từng tar'}")
+    M = {}
+    def use(which):
+        if which in M:
+            return M[which]
+        if not keep_both:
+            M.clear(); free()
+        if which == 'asr':
+            name, pipe = load_asr([PROTO['asr_model']])
+            check('ASR of the locked protocol', name == PROTO['asr_model'], str(name))
+            M['asr'] = pipe
+        else:
+            M['gen'] = load_gen(g['code'], g['revision'])[1]
+        return M[which]
+
+    extra = {'model': f"{g['repo']}@{g['revision'][:8]}", 'protocol_sha': PSHA}
+    n_tars, vram_max = 0, 0.0
+    bar = tqdm(FULL_TARS, desc='HT-Step tar (full)')
+    for tar in bar:
+        bar.set_postfix_str(Path(tar).stem)
+        if MAX_TARS_THIS_SESSION is not None and n_tars >= MAX_TARS_THIS_SESSION:
+            print(f'dừng: đã làm {n_tars} tar trong session này (MAX_TARS_THIS_SESSION)')
+            break
+        if not claim_tar(tar, 'full'):
+            continue
+        t0, vram = time.time(), 0.0
+        mine = FULL_BY_TAR[tar]
+        skip = videos_done() | failed_set()
+        have = {s: {r['key'] for r in read_jsonl(f'{BASE}/captions/htstep_{s}.jsonl')}
+                for s in {r['split'] for v in mine for r in FULL_BY_VID[v]}}
+        todo = [v for v in mine if f'htstep/{v}' not in skip]
+        # resume: video đã có ASR và đủ caption (session trước ngắt trước khi ghi done) thì không cần tải lại
+        complete = [v for v in todo if os.path.exists(f'{BASE}/asr/htstep/{v}.json')
+                    and all(r['key'] in have[r['split']] for r in FULL_BY_VID[v])]
+        if complete:
+            mark_video_done('htstep', *complete)
+        todo = [v for v in todo if v not in complete]
+        work, ok_vids = f'{TMP}/{Path(tar).stem}', []
+        os.makedirs(work, exist_ok=True)
+        try:
+            if todo:
+                for v, path in fetch_videos(tar, todo, work, tar_mode(tar, todo)):
+                    try:
+                        extract_video(path, 'htstep', v, FULL_BY_VID[v], save=False)
+                        ok_vids.append(v)
+                    except Exception as e:
+                        log_failed('htstep', v, tar, e)
+                        drop_local(v)
+                    finally:
+                        os.remove(path)
+        except RuntimeError:                          # CHECK FAIL (thiếu đĩa)
+            set_tar(tar, status='pending', error='thiếu đĩa')
+            raise
+        except Exception as e:
+            set_tar(tar, status='pending', error=f'{type(e).__name__}: {e}'[:300])
+            print('  LỖI', tar, type(e).__name__, str(e)[:200], flush=True)
+            for v in ok_vids:
+                drop_local(v)
+            continue
+        finally:
+            shutil.rmtree(work, ignore_errors=True)   # tar + video xóa ngay sau khi trích frame/audio
+            check(f'{Path(tar).stem}: tar/video tạm đã xóa', not os.path.exists(work))
+
+        for v in tqdm([v for v in ok_vids if not os.path.exists(f'{BASE}/asr/htstep/{v}.json')], desc='  ASR', leave=False):
+            res, _ = transcribe(use('asr'), PROTO['asr_model'], f'{LOCAL}/audio/htstep/{v}.opus')
+            write_json(f'{BASE}/asr/htstep/{v}.json', res)
+            vram = max(vram, gpu_used_gb())
+        by_split = defaultdict(list)
+        for v in ok_vids:
+            for r in FULL_BY_VID[v]:
+                by_split[r['split']].append(r)
+        for s, rows in by_split.items():
+            if any(r['key'] not in have[s] for r in rows):
+                caption_rows(rows, f'{BASE}/captions/htstep_{s}.jsonl', use('gen'), g['variant'], extra)
+                vram = max(vram, gpu_used_gb())
+        for v in ok_vids:
+            drop_local(v)
+        check(f'{Path(tar).stem}: frame/audio tạm đã xóa',
+              not any(os.path.exists(f'{LOCAL}/frames/htstep/{v}') or os.path.exists(f'{LOCAL}/audio/htstep/{v}.opus') for v in ok_vids))
+        if ok_vids:
+            mark_video_done('htstep', *ok_vids)
+        vd, fs = videos_done(), failed_set()
+        n_seg = sum(len(FULL_BY_VID[v]) for v in ok_vids)
+        set_tar(tar, status='done', mode='full', session_id=SESSION_ID, n_ok=sum(f'htstep/{v}' in vd for v in mine),
+                n_fail=sum(f'htstep/{v}' in fs for v in mine), seconds=round(time.time() - t0), segments=n_seg,
+                vram_gb=round(vram, 2), keep_both=keep_both)
+        vram_max = max(vram_max, vram)
+        n_tars += 1
+        print(f'  {tar}: {len(ok_vids)} video, {n_seg} segment, {time.time() - t0:.0f}s, VRAM {vram:.1f} GB', flush=True)
+        if n_tars == 1 and n_seg:
+            full_estimate((time.time() - t0) / n_seg, f'đo trên {tar} (tải + trích + ASR + caption)')
+    M.clear()
+    free()
+    write_json(f'{BASE}/results/full_pass_vram.json', {'keep_both': keep_both, 'gpu_total_gb': round(total, 1),
+                                                       'gen_peak_gb_cell5': sp.get('peak_vram_gb'),
+                                                       'asr_gpu_used_gb_cell4': asp.get('gpu_used_gb'),
+                                                       'full_pass_gpu_used_max_gb': round(vram_max, 2)})
+
+if RUN_FULL_PASS:
+    PROTO, PSHA = verify_protocol()
+    missing, fails = full_gate()
+    if missing:
+        print('CHECK full pass gate STOP: thiếu', missing)
+    elif fails and not FORCE_FULL_PASS:
+        print('CHECK full pass gate STOP: tiêu chí trượt', fails, '-> chỉ chạy tiếp khi đặt FORCE_FULL_PASS = True ở ô 0')
+    else:
+        print('CHECK full pass gate OK' + (f' (FORCE_FULL_PASS, trượt: {fails})' if fails else ''))
+        os.makedirs(TMP, exist_ok=True)
+        print('--- ô 8b bắt đầu'); progress_report()
+        run_full_pass(PROTO, PSHA)
+        print('--- ô 8b kết thúc'); progress_report()
+else:
+    print('SKIP full pass:', {s: len(read_jsonl(f'{BASE}/captions/htstep_{s}.jsonl')) for s in HT_SPLITS if s != 'val'},
+          f'caption / {len(FULL_ROWS)} segment')
+''')
+
 md(r'''
 ## 9. Đánh giá tự động (mục 5)
 
@@ -853,9 +1120,6 @@ toàn tập; BLEU-4 chỉ báo toàn tập.
 
 code(r'''
 # ô 9a. (5.1) Độ giống caption người viết, YC2 val
-def load_caps(name):
-    return {r['key']: r for r in read_jsonl(f'{BASE}/captions/{name}.jsonl')}
-
 def by_video(rows):
     d = defaultdict(list)
     for r in rows:
@@ -906,38 +1170,49 @@ else:
 ''')
 
 code(r'''
-# ô 9b. (5.2) Bám bước, HT-Step val: caption -> headline gần nhất trong các bước của task (sentence embedding)
+# ô 9b. (5.2) Bám bước theo từng split HT-Step: caption -> headline gần nhất trong các bước của task (sentence embedding).
+#       val phải đủ caption; split khác (lượt full) tính trên phần đã có caption, ghi % hoàn thành.
 if RUN_EVAL:
     from sentence_transformers import SentenceTransformer
-    CAP_H = load_caps('htstep_val')
-    rows = [r for r in HT_VAL if r['key'] in CAP_H]
-    check('htstep val captions complete', len(rows) == len(HT_VAL), f'{len(rows)}/{len(HT_VAL)}')
     st = SentenceTransformer(TXT, revision=TXT_REV, device='cuda')
-    texts = {'pseudo': {r['key']: CAP_H[r['key']]['caption'] for r in rows},
-             'asr': {r['key']: asr_window(r) for r in rows}}
-    pool = sorted({h for r in rows for h in r['task_headlines']} | {t for d in texts.values() for t in d.values()})
-    E = dict(zip(pool, st.encode(pool, batch_size=128, normalize_embeddings=True, show_progress_bar=False)))
+    for split in HT_SPLITS:
+        CAP_H = load_caps(f'htstep_{split}')
+        scope = HT_VAL if split == 'val' else [r for r in FULL_ROWS if r['split'] == split]
+        rows = [r for r in scope if r['key'] in CAP_H]
+        if split == 'val':
+            check('htstep val captions complete', len(rows) == len(HT_VAL), f'{len(rows)}/{len(HT_VAL)}')
+        if not rows:
+            print(f'  {split}: chưa có caption, bỏ')
+            continue
+        texts = {'pseudo': {r['key']: CAP_H[r['key']]['caption'] for r in rows},
+                 'asr': {r['key']: asr_window(r) for r in tqdm(rows, desc=f'5.2 ASR {split}')}}
+        pool = sorted({h for r in rows for h in r['task_headlines']} | {t for d in texts.values() for t in d.values()})
+        E = dict(zip(pool, st.encode(pool, batch_size=128, normalize_embeddings=True, show_progress_bar=True)))
 
-    def pred(r, t):
-        return r['task_headlines'][max(range(len(r['task_headlines'])), key=lambda j: float(E[t] @ E[r['task_headlines'][j]]))]
+        def pred(r, t):
+            return r['task_headlines'][max(range(len(r['task_headlines'])), key=lambda j: float(E[t] @ E[r['task_headlines'][j]]))]
 
-    R52 = {'n_segments': len(rows), 'model': [TXT, TXT_REV], 'systems': {}}
-    vids = [r['video_id'] for r in rows]
-    for name, d in texts.items():
-        hit = [pred(r, d[r['key']]) == r['headline'] for r in rows]       # headline trùng chữ coi là đúng
-        R52['systems'][name] = boot_ci(hit, vids)
-        if name == 'pseudo':
-            nf = [(h, r['video_id']) for h, r in zip(hit, rows) if CAP_H[r['key']]['cap_source'] != 'headline_fallback']
-            R52['systems']['pseudo_no_fallback'] = boot_ci([h for h, _ in nf], [v for _, v in nf])
-            errors = [{'key': r['key'], 'caption': d[r['key']], 'headline': r['headline'], 'chosen': pred(r, d[r['key']])}
-                      for h, r in zip(hit, rows) if not h][:20]
-    R52['systems']['random'] = boot_ci([1 / len(set(r['task_headlines'])) for r in rows], vids)
-    for n, s in R52['systems'].items():
-        print(f'  acc@1 {n:20} {fmt(s)}')
-    R52['first_20_errors'] = errors
-    for e in errors:
-        print(f"  x {e['caption']!r}\n      đúng: {e['headline']}\n      chọn: {e['chosen']}")
-    write_json(f'{BASE}/results/eval_5_2_htstep_val.json', R52)
+        R52 = {'split': split, 'n_segments': len(rows), 'complete': round(len(rows) / len(scope), 4), 'model': [TXT, TXT_REV],
+               'systems': {}}
+        vids = [r['video_id'] for r in rows]
+        for name, d in texts.items():
+            hit = [pred(r, d[r['key']]) == r['headline'] for r in rows]       # headline trùng chữ coi là đúng
+            R52['systems'][name] = boot_ci(hit, vids)
+            if name == 'pseudo':
+                nf = [(h, r['video_id']) for h, r in zip(hit, rows) if CAP_H[r['key']]['cap_source'] != 'headline_fallback']
+                if nf:
+                    R52['systems']['pseudo_no_fallback'] = boot_ci([h for h, _ in nf], [v for _, v in nf])
+                errors = [{'key': r['key'], 'caption': d[r['key']], 'headline': r['headline'], 'chosen': pred(r, d[r['key']])}
+                          for h, r in zip(hit, rows) if not h][:20]
+        R52['systems']['random'] = boot_ci([1 / len(set(r['task_headlines'])) for r in rows], vids)
+        print(f"  {split}: {len(rows)}/{len(scope)} segment ({R52['complete']:.1%})")
+        for n, s in R52['systems'].items():
+            print(f'    acc@1 {n:20} {fmt(s)}')
+        R52['first_20_errors'] = errors
+        if split == 'val':
+            for e in errors:
+                print(f"    x {e['caption']!r}\n        đúng: {e['headline']}\n        chọn: {e['chosen']}")
+        write_json(f'{BASE}/results/eval_5_2_htstep_{split}.json', R52)
     st = None
     free()
     check('5.2 done', True)
@@ -1034,10 +1309,15 @@ def ground_texts(r):
 
 if RUN_EVAL:
     R54a = {'generic_nouns': sorted(GENERIC), 'systems': {}}
-    for name, rows, text_of in [
-        ('yc2_val_pseudo', YC2_VAL, lambda r, c=load_caps('yc2_val'): c[r['key']]['caption']),
-        ('yc2_val_gt', YC2_VAL, lambda r: r['gt_caption']),
-        ('htstep_val_pseudo', HT_VAL, lambda r, c=load_caps('htstep_val'): c[r['key']]['caption'])]:
+    systems = [('yc2_val_pseudo', YC2_VAL, lambda r, c=load_caps('yc2_val'): c[r['key']]['caption']),
+               ('yc2_val_gt', YC2_VAL, lambda r: r['gt_caption']),
+               ('htstep_val_pseudo', HT_VAL, lambda r, c=load_caps('htstep_val'): c[r['key']]['caption'])]
+    for s in HT_SPLITS[1:]:                              # split của lượt full: phần đã có caption
+        c = load_caps(f'htstep_{s}')
+        rs = [r for r in FULL_ROWS if r['split'] == s and r['key'] in c]
+        if rs:
+            systems.append((f'htstep_{s}_pseudo', rs, lambda r, c=c: c[r['key']]['caption']))
+    for name, rows, text_of in systems:
         caps = docs([text_of(r) for r in rows])
         bad, top = [], Counter()
         for r, d in tqdm(list(zip(rows, caps)), desc=f'5.4a {name}'):
@@ -1046,7 +1326,8 @@ if RUN_EVAL:
             bad.append(bool(u))
             top.update(u)
         R54a['systems'][name] = {**boot_ci(bad, [r['video_id'] for r in rows]), 'top_ungrounded': top.most_common(20)}
-        print(f'  {name:18} có >= 1 danh từ không căn cứ: {fmt(R54a["systems"][name])}  vd: {top.most_common(6)}')
+        print(f'  {name:18} n={len(rows)} có >= 1 danh từ không căn cứ: {fmt(R54a["systems"][name])}  vd: {top.most_common(6)}')
+        _DOC.clear()                                     # Doc spaCy của hàng chục nghìn text tốn RAM
     write_json(f'{BASE}/results/eval_5_4a_nouns.json', R54a)
     check('5.4a done', True)
 else:
@@ -1159,13 +1440,8 @@ else:
 ''')
 
 code(r'''
-# ô 10. Bảng tiêu chí (mục 6) và kết luận tự động
-def load_res(n):
-    p = f'{BASE}/results/{n}.json'
-    return json.load(open(p, encoding='utf-8')) if os.path.exists(p) else None
-
+# ô 10. Bảng tiêu chí (mục 6) và kết luận tự động. T7 báo theo từng split; kết luận dùng T7 của val.
 r51, r52, r53, r54b = (load_res(n) for n in ('eval_5_1_yc2_val', 'eval_5_2_htstep_val', 'eval_5_3_r1_in_video', 'eval_5_4b_judge'))
-caps_h = load_caps('htstep_val')
 C, rows = CRITERIA, []
 def crit(t, desc, value, ok):
     rows.append({'T': t, 'desc': desc, 'value': value, 'pass': ok})
@@ -1187,9 +1463,12 @@ if r53:
 if r52:
     v = r52['systems']['pseudo']
     crit('T4', 'HT-Step: bám bước acc@1', fmt(v), v['mean'] >= C['T4_step_acc1'])
-if caps_h:
-    fb = sum(c['cap_source'] == 'headline_fallback' for c in caps_h.values()) / len(caps_h)
-    crit('T7', 'HT-Step: tỉ lệ headline_fallback', f'{fb:.4f}', fb <= C['T7_fallback_max'])
+for s in HT_SPLITS:
+    caps_h = load_caps(f'htstep_{s}')
+    if caps_h:
+        fb = sum(c['cap_source'] == 'headline_fallback' for c in caps_h.values()) / len(caps_h)
+        crit('T7' if s == 'val' else f'T7_{s}', f'HT-Step {s}: tỉ lệ headline_fallback ({len(caps_h)} caption)', f'{fb:.4f}',
+             fb <= C['T7_fallback_max'])
 
 rows.sort(key=lambda x: x['T'])
 for x in rows:
@@ -1210,28 +1489,38 @@ check('criteria table written', True)
 ''')
 
 code(r'''
-# ô 11. Xuất HT-Step val theo đúng định dạng annotation YC2 (pseudo và headline) + gom kết quả
-caps_h = load_caps('htstep_val')
-rows = sorted((r for r in HT_VAL if r['key'] in caps_h), key=lambda r: (r['video_id'], r['seg_idx']))
-out = {}
-for kind in ('pseudo', 'headline'):
-    db = {}
-    for r in rows:
-        v = db.setdefault(r['video_id'], {'duration': r['duration'], 'subset': 'validation', 'recipe_type': r['task'],
-                                          'annotations': [], 'video_url': f"https://www.youtube.com/watch?v={r['youtube_id']}"})
-        c = caps_h[r['key']]
-        v['annotations'].append({'segment': [r['start'], r['end']], 'id': r['seg_idx'],
-                                 'sentence': c['caption'] if kind == 'pseudo' else clean(r['headline']),
-                                 'step_id': r['step_id'], 'headline': r['headline'], 'cap_source': c['cap_source']})
-    out[kind] = f'{BASE}/export/htstep_val_{kind}.json'
-    write_json(out[kind], {'database': db, 'note': 'HT-Step val_seen, chỉ video có trên HF; sentence của bản headline = '
-                                                   'headline chữ thường, bỏ dấu chấm cuối'})
-    print(kind, len(db), 'video,', sum(len(v['annotations']) for v in db.values()), 'segment ->', out[kind])
-check('export matches captions', len(rows) == len(caps_h) and len(rows) > 0, f'{len(rows)} segment')
-write_json(f'{BASE}/results/per_segment_htstep_val.json',
-           [{'key': r['key'], 'video_id': r['video_id'], 'start': r['start'], 'end': r['end'], 'step_id': r['step_id'],
-             'headline': r['headline'], 'pseudo': caps_h[r['key']]['caption'], 'cap_source': caps_h[r['key']]['cap_source'],
-             'asr': asr_window(r)} for r in rows])
+# ô 11. Xuất HT-Step mọi split theo đúng định dạng annotation YC2 (pseudo và headline) + gom kết quả.
+#       Chạy được khi split chưa xong: chỉ xuất segment đã có caption, ghi % hoàn thành.
+SUBSET = {'val': 'validation', 'train': 'training'}
+n_out = 0
+for split in HT_SPLITS:
+    caps_h = load_caps(f'htstep_{split}')
+    scope = HT_VAL if split == 'val' else [r for r in FULL_ROWS if r['split'] == split]
+    rows = sorted((r for r in scope if r['key'] in caps_h), key=lambda r: (r['video_id'], r['seg_idx']))
+    done = len(rows) / len(scope) if scope else 0.0
+    print(f'{split}: {len(rows)}/{len(scope)} segment có caption ({done:.1%})')
+    if not rows:
+        continue
+    for kind in ('pseudo', 'headline'):
+        db = {}
+        for r in rows:
+            v = db.setdefault(r['video_id'], {'duration': r['duration'], 'subset': SUBSET.get(split, split), 'recipe_type': r['task'],
+                                              'annotations': [], 'video_url': f"https://www.youtube.com/watch?v={r['youtube_id']}"})
+            c = caps_h[r['key']]
+            v['annotations'].append({'segment': [r['start'], r['end']], 'id': r['seg_idx'],
+                                     'sentence': c['caption'] if kind == 'pseudo' else clean(r['headline']),
+                                     'step_id': r['step_id'], 'headline': r['headline'], 'cap_source': c['cap_source']})
+        p = f'{BASE}/export/htstep_{split}_{kind}.json'
+        write_json(p, {'database': db, 'complete': round(done, 4), 'segments': len(rows), 'segments_in_scope': len(scope),
+                       'note': f'HT-Step {split}, chỉ video có trên HF và đã có caption; sentence của bản headline = '
+                               'headline chữ thường, bỏ dấu chấm cuối'})
+        print(f'  {kind}: {len(db)} video, {len(rows)} segment -> {p}')
+    write_json(f'{BASE}/results/per_segment_htstep_{split}.json',
+               [{'key': r['key'], 'video_id': r['video_id'], 'start': r['start'], 'end': r['end'], 'step_id': r['step_id'],
+                 'headline': r['headline'], 'pseudo': caps_h[r['key']]['caption'], 'cap_source': caps_h[r['key']]['cap_source'],
+                 'asr': asr_window(r)} for r in tqdm(rows, desc=f'per-segment {split}')])
+    n_out += len(rows)
+check('export written', n_out > 0, f'{n_out} segment')
 print('Tải về pseudocap/results/: thư mục', f'{BASE}/results', '| pseudocap/export/:', f'{BASE}/export',
       '| pseudocap/configs/: htstep_cap_protocol.json')
 ''')

@@ -39,6 +39,10 @@
  "yc2_train_overlap_dev_val": [],
  "yc2_dev_overlap_val": [],
  "yc2_start_ge_end_or_zero_len": [],
+ "htstep_train_videos": 17472,
+ "htstep_train_segments": 103293,
+ "htstep_train_bad_segments": [],
+ "htstep_train_n_bad_segments": 0,
  "hf_shards": {
   "tars": 113,
   "source": "metadata/tar_index.csv"

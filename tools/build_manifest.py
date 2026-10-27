@@ -1,9 +1,12 @@
-"""Build metadata/manifest.jsonl (YC2 dev+val, HT-Step val), yc2_train_text.jsonl, yc2_dev_val_split.json.
+"""Build metadata/manifest.jsonl (YC2 dev+val, HT-Step val), manifest_htstep_train.jsonl.gz (HT-Step train, same schema),
+yc2_train_text.jsonl, yc2_dev_val_split.json. HT-Step test/val_unseen have no public annotations, so train + val is all.
+Train rows go to a separate gzip file: as plain jsonl they would be ~135 MB, over GitHub's 100 MB per-file limit.
 
 Text only: reads annotation files and metadata/tar_index.csv, never a video.
 Run after build_tar_index.py: python -I -X utf8 tools/build_manifest.py
 """
 import csv
+import gzip
 import hashlib
 import json
 from collections import Counter, defaultdict
@@ -39,6 +42,12 @@ def write_jsonl(p, rows):
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
+def write_jsonl_gz(p, rows):
+    """Byte-reproducible gzip (mtime 0, no file name), so the sha256 checked by notebook cell 1 is stable."""
+    with open(p, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
+        f.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows).encode("utf-8"))
+
+
 def htstep_shard_map():
     """video_id -> tar path, from metadata/tar_index.csv (tools/build_tar_index.py reads the tar headers on HF).
     A video found in several tars takes the first tar in sorted order."""
@@ -50,13 +59,13 @@ def htstep_shard_map():
     return where, {"tars": len({r["tar_path"] for r in idx}), "source": "metadata/tar_index.csv"}
 
 
-def htstep_rows(where):
+def htstep_rows(where, subset, split):
     anno = read_json(HTSTEP / "annotations.json")
     cand = read_json(HTSTEP / "video_candidate_steps.json")
     with open(HTSTEP / "taxonomy.csv", encoding="utf-8") as f:
         tax = {int(r["global_step_index"]): r for r in csv.DictReader(f)}
     rows = []
-    for vid in sorted(v for v, a in anno.items() if a["subset"] == "val_seen"):
+    for vid in sorted(v for v, a in anno.items() if a["subset"] == subset):
         a = anno[vid]
         steps = cand[vid]["candidate_step_ids"]
         assert cand[vid]["activity"] == a["activity"] and cand[vid]["variation"] == a["variation"], vid
@@ -64,7 +73,7 @@ def htstep_rows(where):
             t = tax[s["id"]]
             assert t["activity"] == a["activity"] and s["id"] in steps, (vid, s["id"])
             rows.append({
-                "key": f"htstep/val/{vid}/{i}", "dataset": "htstep", "split": "val",
+                "key": f"htstep/{split}/{vid}/{i}", "dataset": "htstep", "split": split,
                 "video_id": vid, "youtube_id": vid, "hf_repo": HF_VIDEOS, "hf_path": where.get(vid),
                 "seg_idx": i, "start": s["segment"][0], "end": s["segment"][1], "duration": a["duration"],
                 "task": a["activity"], "variation": a["variation"], "step_id": s["id"],
@@ -148,13 +157,19 @@ def checks(ht, yc, train, split, db):
 
 def main():
     where, shard_info = htstep_shard_map()
-    ht = htstep_rows(where)
+    ht = htstep_rows(where, "val_seen", "val")
+    ht_train = htstep_rows(where, "train", "train")
+    bad = [r["key"] for r in ht_train if not r["start"] < r["end"] or not r["headline"]]
+    rep_train = {"htstep_train_videos": len({r["video_id"] for r in ht_train}), "htstep_train_segments": len(ht_train),
+                 "htstep_train_bad_segments": bad[:20], "htstep_train_n_bad_segments": len(bad)}
     yc, train, split, db = yc2_rows()
     rep = checks(ht, yc, train, split, db)
+    rep.update(rep_train)
     rep["hf_shards"] = shard_info
     rep["hf_videos_total"] = len(where)
 
     write_jsonl(OUT / "manifest.jsonl", yc + ht)
+    write_jsonl_gz(OUT / "manifest_htstep_train.jsonl.gz", ht_train)
     write_jsonl(OUT / "yc2_train_text.jsonl", train)
     split_out = {"dev": split["dev"], "val": split["val"],
                  "source": {"dev": "YouCookII/metadata/train_omni_video.dev.jsonl",
