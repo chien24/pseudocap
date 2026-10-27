@@ -99,3 +99,5 @@ sentence-transformers 5.0.0, bert-score 0.3.13, pycocoevalcap 1.2, spacy 3.8.7 +
 ### Chờ chạy trên Colab
 
 Tốc độ, `CHECK` từng ô: chưa có. Ghi vào đây khi user gửi log.
+
+Commit: `f66a17f` (tools + metadata + notebook + nhật ký), sau đó `.gitattributes` (`* -text`, giữ nguyên byte để sha256 ở ô 1 khớp).
