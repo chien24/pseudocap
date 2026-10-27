@@ -1,6 +1,8 @@
-# Upload lên Drive
+# Metadata cho notebook
 
-Thư mục đích: `MyDrive/Colab Notebooks/code KL/Fushion/htstep_cap/metadata/` (cùng gốc `Colab Notebooks/code KL/Fushion/` với notebook UEMR).
+Không cần upload: ô 1 clone `https://github.com/chien24/pseudocap.git` và đọc `metadata/` từ đó.
+Sửa metadata thì chạy lại tools rồi commit + push (trước khi khóa protocol).
+Kết quả ghi lên Drive `MyDrive/Colab Notebooks/code KL/Fushion/htstep_cap/` (cùng gốc `Colab Notebooks/code KL/Fushion/` với notebook UEMR).
 
 | File | Số dòng | sha256 |
 |---|---:|---|
@@ -9,9 +11,8 @@ Thư mục đích: `MyDrive/Colab Notebooks/code KL/Fushion/htstep_cap/metadata/
 | `yc2_dev_val_split.json` | 514 | `f0d5d2f7d45f0794…` |
 | `availability.csv` | 1099 | `7e107616cd12503f…` |
 | `yc2_stats.json` | 136 | `0e90590cac8c2014…` |
-| `UPLOAD.md` (file này) | | |
 
-Notebook: `notebooks/htstep_pseudocap_AZ.ipynb` → `MyDrive/Colab Notebooks/code KL/Fushion/htstep_cap/` rồi mở bằng Colab (GPU T4).
+Notebook: upload `notebooks/htstep_pseudocap_AZ.ipynb` (hoặc mở từ GitHub trong Colab), GPU T4.
 
 Video không cần upload: YC2 đọc từ `Colab Notebooks/code KL/Omni/data/YouCookII/videos/<video_id>.mp4`
 (như các notebook UEMR), HT-Step tải từ HF `nguyenminh04/htstep-videos` (tar shard, cột `hf_path`).

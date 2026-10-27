@@ -21,13 +21,14 @@ def code(s):
 md(r'''
 # HT-Step pseudo-caption kiểu YouCook2: sinh + đánh giá tự động (A–Z)
 
-Plan: `Data/Htstep/HTSTEP_PSEUDO_CAPTION.md`. Metadata do `pseudocap/tools/*.py` tạo ở local, upload theo `metadata/UPLOAD.md`.
+Plan: `Data/Htstep/HTSTEP_PSEUDO_CAPTION.md`. Metadata do `pseudocap/tools/*.py` tạo ở local; ô 1 tự clone repo
+`github.com/chien24/pseudocap` để lấy `metadata/`, chỉ cần upload notebook này.
 
 **Cách chạy.** Luôn chạy tuần tự từ ô 0; cờ `RUN_*` ở ô 0 chỉ bật/tắt phần nặng (ô tắt vẫn định nghĩa hàm cho ô sau).
 Mọi kết quả trung gian nằm trên Drive và có resume, Colab ngắt thì chạy lại từ ô 0.
 
 1. Phiên 1: `RUN_EXTRACT`, `RUN_ASR`, `RUN_SPEED`, `RUN_DEV_GRID` = True → ô 6 in sha256 của protocol.
-2. Tải `htstep_cap_protocol.json` về `pseudocap/configs/`, dán sha256 vào `PROTOCOL_SHA256`.
+2. Tải `htstep_cap_protocol.json` về `pseudocap/configs/` (commit + push), dán sha256 vào `PROTOCOL_SHA256`.
 3. Phiên 2: tắt 4 cờ trên, bật `RUN_YC2_VAL`, `RUN_HTSTEP_VAL`, `RUN_EVAL`, `RUN_JUDGE`.
 
 Mỗi ô in `CHECK ... OK/FAIL`; `FAIL` dừng ô bằng exception.
@@ -41,7 +42,9 @@ from collections import Counter, defaultdict
 
 DRIVE      = '/content/drive/MyDrive/Colab Notebooks/code KL'
 BASE       = f'{DRIVE}/Fushion/htstep_cap'
-META       = f'{BASE}/metadata'
+REPO_URL   = 'https://github.com/chien24/pseudocap.git'  # metadata/ lấy từ repo, không upload
+REPO_DIR   = '/content/pseudocap'
+META       = f'{REPO_DIR}/metadata'
 YC2_VIDEOS = f'{DRIVE}/Omni/data/YouCookII/videos'     # = DRIVE_DATA/videos của notebook UEMR
 HF_REPO    = 'nguyenminh04/htstep-videos'                # dataset public, video trong tar shard (hf_path)
 LOCAL      = '/content/htcap'                            # đĩa Colab: video tạm, frame giải nén
@@ -154,9 +157,15 @@ print('ô 0 xong')
 ''')
 
 code(r'''
-# ô 1. Mount Drive, đọc metadata, kiểm khớp UPLOAD.md
+# ô 1. Mount Drive, clone/pull repo pseudocap lấy metadata, kiểm khớp UPLOAD.md
 from google.colab import drive
 drive.mount('/content/drive')
+if os.path.isdir(f'{REPO_DIR}/.git'):
+    subprocess.run(['git', '-C', REPO_DIR, 'pull', '-q', '--ff-only'], check=True)
+else:
+    subprocess.run(['git', 'clone', '-q', REPO_URL, REPO_DIR], check=True)
+GIT_COMMIT = subprocess.run(['git', '-C', REPO_DIR, 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
+print('pseudocap commit', GIT_COMMIT)
 for d in ['cache/frames/yc2', 'cache/frames/htstep', 'cache/audio/yc2', 'cache/audio/htstep', 'cache/done/yc2',
           'cache/done/htstep', 'asr/yc2', 'asr/htstep', 'captions/dev_grid', 'judge', 'results', 'export']:
     os.makedirs(f'{BASE}/{d}', exist_ok=True)
@@ -632,7 +641,7 @@ elif RUN_DEV_GRID:
         'selection': {'rule': 'max CIDEr trên YC2 dev; hòa (chênh < 1 điểm) -> model nhanh hơn', 'dev_table': TABLE,
                       'speed': SPEED},
         'n_boot': N_BOOT, 'judge_n': [N_JUDGE_CAL, N_JUDGE_YC2, N_JUDGE_HT],
-        'metadata_sha256': {k: v[1] for k, v in COUNTS.items()},
+        'metadata_sha256': {k: v[1] for k, v in COUNTS.items()}, 'pseudocap_commit': GIT_COMMIT,
     }
     write_json(PROTO_PATH, proto)
     print('CHỌN:', CHOSEN)
@@ -652,6 +661,7 @@ def verify_protocol():
     check('few-shot unchanged', [s['sentence'] for s in p['fewshot']] == [s['sentence'] for s in FEWSHOT])
     check('criteria unchanged', p['criteria'] == CRITERIA)
     check('decode unchanged', p['gen']['decode'] == DECODE)
+    check('metadata unchanged since lock', p['metadata_sha256'] == {k: v[1] for k, v in COUNTS.items()})
     return p, sha
 ''')
 

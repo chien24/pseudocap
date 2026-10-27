@@ -1,4 +1,4 @@
-"""Write metadata/UPLOAD.md: files to upload, Drive target, line counts + sha256 that notebook cell 1 checks.
+"""Write metadata/UPLOAD.md: line counts + sha256 that notebook cell 1 checks after cloning the repo.
 
 Run last (after build_manifest, check_availability, yc2_style_stats): python -I -X utf8 tools/write_upload.py
 """
@@ -18,16 +18,17 @@ def main():
         b = (META / f).read_bytes()
         counts[f] = [b.decode("utf-8").count("\n") + (not b.endswith(b"\n")), hashlib.sha256(b).hexdigest()]
     lines = [
-        "# Upload lên Drive",
+        "# Metadata cho notebook",
         "",
-        f"Thư mục đích: `{DRIVE}/metadata/` (cùng gốc `Colab Notebooks/code KL/Fushion/` với notebook UEMR).",
+        "Không cần upload: ô 1 clone `https://github.com/chien24/pseudocap.git` và đọc `metadata/` từ đó.",
+        "Sửa metadata thì chạy lại tools rồi commit + push (trước khi khóa protocol).",
+        f"Kết quả ghi lên Drive `{DRIVE}/` (cùng gốc `Colab Notebooks/code KL/Fushion/` với notebook UEMR).",
         "",
         "| File | Số dòng | sha256 |",
         "|---|---:|---|",
         *[f"| `{f}` | {n} | `{h[:16]}…` |" for f, (n, h) in counts.items()],
-        "| `UPLOAD.md` (file này) | | |",
         "",
-        f"Notebook: `notebooks/htstep_pseudocap_AZ.ipynb` → `{DRIVE}/` rồi mở bằng Colab (GPU T4).",
+        "Notebook: upload `notebooks/htstep_pseudocap_AZ.ipynb` (hoặc mở từ GitHub trong Colab), GPU T4.",
         "",
         "Video không cần upload: YC2 đọc từ `Colab Notebooks/code KL/Omni/data/YouCookII/videos/<video_id>.mp4`",
         "(như các notebook UEMR), HT-Step tải từ HF `nguyenminh04/htstep-videos` (tar shard, cột `hf_path`).",
