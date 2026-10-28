@@ -634,7 +634,22 @@ code(r'''
 # ô 4. ASR cho mọi video đã trích (cache asr/<dataset>/<video_id>.json, timestamp từng từ). Cùng một ASR cho YC2 và HT-Step;
 #      load_asr/transcribe dùng lại ở ô 8b (cùng model, cùng tham số).
 import numpy as np
+def cuda12_cublas():
+    """ctranslate2 (faster-whisper) build cho CUDA 12 và dlopen('libcublas.so.12') lúc chạy (cuDNN không bắt buộc từ 4.6.3);
+    torch trên Colab không mang thư viện này -> cài nvidia-cublas-cu12 và nạp sẵn bằng RTLD_GLOBAL để dlopen tìm thấy."""
+    import ctypes, sys, glob, site
+    find = lambda: sorted(p for d in site.getsitepackages() for p in glob.glob(f'{d}/nvidia/**/libcublas*.so.12', recursive=True))
+    libs = find()
+    if not libs:
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'nvidia-cublas-cu12'], check=True)
+        libs = find()
+    for p in sorted(libs, key=lambda p: 'Lt' not in p):   # libcublasLt trước, libcublas cần nó
+        ctypes.CDLL(p, mode=ctypes.RTLD_GLOBAL)
+    import torch
+    print('torch CUDA', torch.version.cuda, '| nạp', [os.path.basename(p) for p in libs])
+
 def load_asr(names=ASR_MODELS):
+    cuda12_cublas()
     from faster_whisper import WhisperModel, BatchedInferencePipeline
     for name in names:
         try:
