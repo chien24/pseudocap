@@ -365,7 +365,7 @@ progress_report()
 
 code(r'''
 # ô 2. Cài thư viện (ghim phiên bản), in phiên bản, kiểm model trên HF
-%pip -q install transformers==4.53.3 accelerate==1.9.0 bitsandbytes==0.46.1 faster-whisper==1.1.1 sentence-transformers==5.0.0 bert-score==0.3.13 pycocoevalcap==1.2 spacy==3.8.7
+%pip -q install transformers==4.53.3 accelerate==1.9.0 bitsandbytes==0.50.2 faster-whisper==1.1.1 sentence-transformers==5.0.0 bert-score==0.3.13 pycocoevalcap==1.2 spacy==3.8.7
 !python -m spacy download en_core_web_sm-3.8.0 --direct -q
 !apt-get -qq install -y default-jre > /dev/null
 ''')
@@ -383,6 +383,10 @@ for p in ['accelerate', 'bitsandbytes', 'faster-whisper', 'ctranslate2', 'senten
     except im.PackageNotFoundError:
         pass
 check('transformers pinned', transformers.__version__ == '4.53.3', transformers.__version__)
+# Colab hiện dùng torch CUDA 13.0; bitsandbytes 0.46.1 không có bản build cuda130 nên q7b4 (4-bit) không tải được.
+bnb_lib = f"libbitsandbytes_cuda{torch.version.cuda.replace('.', '')}.so"
+check('bitsandbytes has a binary for torch CUDA',
+      os.path.exists(os.path.join(os.path.dirname(im.distribution('bitsandbytes').locate_file('bitsandbytes/__init__.py')), bnb_lib)), bnb_lib)
 check('java + ffmpeg', bool(shutil.which('java')) and bool(shutil.which('ffmpeg')))
 
 try:

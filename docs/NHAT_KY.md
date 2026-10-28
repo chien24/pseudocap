@@ -230,3 +230,14 @@ Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pse
 - Kết quả: `large-v3-turbo`, 841/841 video trong 2:12:15 (8,13 s/video), audio 290.054 s (80,6 h), **36,6x realtime**, VRAM cả GPU
   khi chạy ASR **4,96 GB**. Ngôn ngữ tự nhận: en 788, es 33, de 4, tl 3, fr 2, nl 2, ja 2, el 1 (53 video ngoài en, chưa kiểm đúng
   sai). 9 video không có từ nào. `CHECK asr for every ready video OK 841/841`, `CHECK one ASR model for all OK`.
+
+## 2026-10-28: ô 5 (đo tốc độ), phiên 1
+
+- **q7b4 không tải được**: bitsandbytes 0.46.1 không có `libbitsandbytes_cuda130.so` (torch CUDA 13.0) → `SPEED['q7b4'] = None`
+  (đã tải 16,5 GB trọng số vào cache HF của phiên). Chưa chạy ô 6, để protocol không khóa khi thiếu q7b4.
+- **q3b**: `seg_per_h_P2` 2640, `model_ok` 20/20, `peak_vram_gb` 8,44. Ước lượng giờ: dev grid 0,9, YC2 val 1,1, HT-Step val 0,8.
+- Lượt full (ô 8b): 7038 video, 43.664 segment, audio 783,6 h, ASR 21,4 giờ GPU, caption q3b 16,5 giờ GPU (chưa tính tải + trích).
+- Cảnh báo `generation flags are not valid ... ['temperature']` lặp mỗi segment: vô hại (greedy).
+- Sửa: ô 2 ghim `bitsandbytes==0.50.2` (wheel có `libbitsandbytes_cuda130.so`, đã đọc danh sách file trong wheel bằng range
+  request); ô 2b thêm `CHECK bitsandbytes has a binary for torch CUDA`. Chưa kiểm trên Colab: bnb 0.50.2 với transformers 4.53.3,
+  bản cuda130 chạy trên T4 (sm_75).
