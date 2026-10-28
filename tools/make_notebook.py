@@ -633,6 +633,7 @@ check('frames ready', len(READY) > 0)
 code(r'''
 # ô 4. ASR cho mọi video đã trích (cache asr/<dataset>/<video_id>.json, timestamp từng từ). Cùng một ASR cho YC2 và HT-Step;
 #      load_asr/transcribe dùng lại ở ô 8b (cùng model, cùng tham số).
+import numpy as np
 def load_asr(names=ASR_MODELS):
     from faster_whisper import WhisperModel, BatchedInferencePipeline
     for name in names:
@@ -642,11 +643,18 @@ def load_asr(names=ASR_MODELS):
             print('ASR không tải được', name, e)
     return None, None
 
+def load_audio(aud, sr=16000):
+    """Giải mã như faster_whisper.decode_audio (mono, 16 kHz, s16 / 32768) nhưng bằng ffmpeg: PyAV mới trên Colab không nhận
+    tham số metadata_errors mà faster-whisper 1.1.1 truyền vào av.open."""
+    r = subprocess.run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-i', aud, '-f', 's16le', '-ac', '1', '-ar', str(sr), '-'],
+                       capture_output=True, check=True)
+    return np.frombuffer(r.stdout, np.int16).astype(np.float32) / 32768.0
+
 def transcribe(pipe, name, aud):
     """-> (json ghi vào asr/, số giây audio). Không có audio: words rỗng."""
     if not os.path.exists(aud):
         return {'model': name, 'language': None, 'words': [], 'note': 'no audio stream'}, 0.0
-    segs, info = pipe.transcribe(aud, batch_size=16, word_timestamps=True)
+    segs, info = pipe.transcribe(load_audio(aud), batch_size=16, word_timestamps=True)
     words = [[round(w.start, 2), round(w.end, 2), w.word.strip()] for s in segs for w in (s.words or [])]
     return {'model': name, 'language': info.language, 'language_probability': round(info.language_probability, 3),
             'words': words}, info.duration
