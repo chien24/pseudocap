@@ -68,7 +68,7 @@ SEED       = 0
 N_BOOT     = 1000
 
 RUN_EXTRACT    = True
-RUN_ASR        = True
+RUN_ASR        = False    # 841/841 video đã có ASR trên Drive (2026-10-28); False: ô 4 chỉ đọc lại
 RUN_SPEED      = True
 RUN_DEV_GRID   = True
 RUN_YC2_VAL    = False    # chỉ bật sau khi đã điền PROTOCOL_SHA256
@@ -87,7 +87,7 @@ ASR_MODELS   = ['large-v3-turbo', 'medium.en']                    # [chính, d�
 JUDGE_MODELS = ['OpenGVLab/InternVL3-8B-hf', 'OpenGVLab/InternVL3-2B-hf']
 VIS_MODELS   = ['google/siglip-so400m-patch14-384', 'openai/clip-vit-large-patch14']
 TXT_MODELS   = ['sentence-transformers/all-mpnet-base-v2', 'BAAI/bge-large-en-v1.5']
-DECODE       = dict(do_sample=False, max_new_tokens=40)
+DECODE       = dict(do_sample=False, max_new_tokens=40, temperature=None, top_p=None, top_k=None)   # greedy; None: bỏ sampling của generation_config
 VARIANTS     = {'P0': ('frames', 'task'), 'P1': ('frames', 'task', 'asr'), 'P2': ('frames', 'task', 'asr', 'fewshot')}
 N_FRAMES, ASR_PAD, ASR_MAX_WORDS, N_FEWSHOT = 8, 3.0, 120, 8
 N_JUDGE_CAL, N_JUDGE_HT, N_JUDGE_YC2 = 300, 600, 300
@@ -1446,7 +1446,7 @@ if RUN_JUDGE:
                  [{'type': 'text', 'text': JUDGE_Q.format(asr=asr_window(r) or '(no speech)', cap=cap)}]}]
         text = jp.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
         inp = jp(text=text, images=load_frames(r), crop_to_patches=False, return_tensors='pt').to('cuda', torch.float16)
-        out = jm.generate(**inp, do_sample=False, max_new_tokens=60)
+        out = jm.generate(**inp, do_sample=False, max_new_tokens=60, temperature=None, top_p=None, top_k=None)
         return jp.batch_decode(out[:, inp['input_ids'].shape[1]:], skip_special_tokens=True)[0]
 
     def run_judge(name, items):
