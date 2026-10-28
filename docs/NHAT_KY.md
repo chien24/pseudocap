@@ -208,3 +208,14 @@ Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pse
   q85 bằng cv2 như cũ); cv2 chưa đọc được frame nào thì cả video dùng ffmpeg. `cache/info/<ds>/<vid>.json` ghi `ffmpeg_frames`.
 - Cờ `RETRY_FAILED` (ô 0): xóa video YC2/HT-Step val khỏi `failed.csv`, đưa tar của chúng về `pending`; ô 3 tải lại tar đó và chỉ
   xử lý video chưa có trong `videos_done.txt`.
+
+## 2026-10-28: log ô 3 (phiên 1, lần 3, `RETRY_FAILED = True`)
+
+- `RETRY_FAILED: thử lại 8 video`; tar 1000, 1001 về `pending`; 1002 `in_progress` của session cũ 912 phút trước (> `STALE_HOURS`)
+  nên được nhận lại. Đầu ô: HT-Step val xong 168/343.
+- 5 tar extract xong trong 40:41 (khoảng 503 s/tar; tải 10–38 s/tar, 49–172 MB/s). Mỗi tar `CHECK ... đã xóa OK`. Tar 1004 đọc
+  range 3 video.
+- Cuối ô: YC2 dev 104/104, YC2 val 394/394, HT-Step val 343/343, **lỗi 0** → 8 video lỗi trước đều qua (dự phòng ffmpeg; số frame
+  lấy bằng ffmpeg nằm ở `cache/info/htstep/<vid>.json`, chưa xem). Codec thật vẫn chưa kiểm.
+- Giải nén frame về `/content`: 841 video trong 12:03 (1,29 s/video). Segment có frame: yc2/dev 773, yc2/val 3030, htstep/val 2195
+  (khớp manifest). `CHECK every video done or logged as failed OK`, `CHECK frames ready OK`.
