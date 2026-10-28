@@ -198,3 +198,13 @@ hoặc val).
 Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pseudocap/`); các thay đổi v4 ghi ở đây.
 
 2026-10-27 (sau): metadata không upload nữa: ô 1 clone/pull `github.com/chien24/pseudocap` (public) vào `/content/pseudocap`, đọc `metadata/` từ đó; protocol ghi thêm `pseudocap_commit`; `verify_protocol` kiểm sha256 metadata không đổi sau khi khóa. Commit `dcde5bb`.
+
+## 2026-10-28: log ô 3 (phiên 1, lần 2)
+
+- Tải tuần tự đúng: 1000.tar 1,79 GB trong 10 s (176 MB/s), 1001.tar 1,69 GB trong 9 s; mỗi tar `CHECK ... đã xóa OK` trước tar
+  sau; khoảng 650 s/tar (gần hết là trích frame/audio). Ô bị dừng khi đang tải 1002 (chưa thấy traceback).
+- 8 video HT-Step lỗi `no frame at ...` ngay frame đầu (1000: 7, 1001: 1). **[giả thuyết]** OpenCV bản pip không giải mã được
+  codec (có thể AV1). Sửa: frame nào cv2 không đọc được thì lấy bằng ffmpeg (`-ss t -frames:v 1`, PNG qua pipe, rồi resize + JPEG
+  q85 bằng cv2 như cũ); cv2 chưa đọc được frame nào thì cả video dùng ffmpeg. `cache/info/<ds>/<vid>.json` ghi `ffmpeg_frames`.
+- Cờ `RETRY_FAILED` (ô 0): xóa video YC2/HT-Step val khỏi `failed.csv`, đưa tar của chúng về `pending`; ô 3 tải lại tar đó và chỉ
+  xử lý video chưa có trong `videos_done.txt`.

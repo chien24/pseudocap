@@ -75,6 +75,7 @@ RUN_YC2_VAL    = False    # chỉ bật sau khi đã điền PROTOCOL_SHA256
 RUN_HTSTEP_VAL = False
 RUN_EVAL       = False
 RUN_JUDGE      = False
+RETRY_FAILED   = False    # ô 3: xóa video YC2/HT-Step val khỏi failed.csv, đưa tar của chúng về pending rồi làm lại
 RUN_FULL_PASS  = False    # ô 8b: HT-Step ngoài tar val (train). Cổng: protocol khóa + caption HT-Step val xong + T4, T6 đã tính
 FORCE_FULL_PASS = False   # True: chạy ô 8b dù T4/T6 trượt
 MAX_TARS_THIS_SESSION = None   # số tar 'full' tối đa mỗi session (None = không giới hạn)
@@ -141,13 +142,16 @@ def failed_rows():
 def failed_set():
     return {f"{x['dataset']}/{x['video_id']}" for x in failed_rows()}   # thử lại: xóa dòng trong failed.csv
 
-def log_failed(ds, vid, src, err):
+def write_failed(rows):
     import io
     buf = io.StringIO()
     w = csv.DictWriter(buf, ['dataset', 'video_id', 'tar_path', 'error'])
     w.writeheader()
-    w.writerows(failed_rows() + [{'dataset': ds, 'video_id': vid, 'tar_path': src, 'error': str(err)[:300]}])
+    w.writerows(rows)
     write_text(f'{PROGRESS}/failed.csv', buf.getvalue())
+
+def log_failed(ds, vid, src, err):
+    write_failed(failed_rows() + [{'dataset': ds, 'video_id': vid, 'tar_path': src, 'error': str(err)[:300]}])
     print('  FAILED', ds, vid, str(err)[:120], flush=True)
 
 def load_tars():
@@ -410,7 +414,14 @@ code(r'''
 #      -> xóa), tiến trình trên Drive (progress/tars.json, videos_done.txt, failed.csv). Chạy lại ở session mới sẽ tiếp tục.
 #      Hàm trong ô này (extract_video, claim_tar, fetch_videos) dùng lại ở ô 8b.
 import cv2, requests
+import numpy as np
 from huggingface_hub import hf_hub_download, hf_hub_url
+
+def ffmpeg_frame(path, t):
+    """Một frame BGR tại t giây bằng ffmpeg (đọc được codec mà OpenCV pip không đọc, vd. AV1); None nếu không có."""
+    r = subprocess.run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-ss', f'{max(t, 0):.3f}', '-i', path, '-frames:v', '1',
+                        '-f', 'image2pipe', '-vcodec', 'png', '-'], capture_output=True)
+    return cv2.imdecode(np.frombuffer(r.stdout, np.uint8), cv2.IMREAD_COLOR) if r.stdout else None
 
 def seg_times(s, e):
     return [s + (i + 0.5) * (e - s) / N_FRAMES for i in range(N_FRAMES)]
@@ -425,16 +436,24 @@ def extract_video(path, ds, vid, segs, save=True):
     cap = cv2.VideoCapture(path)
     fps, nfr = cap.get(cv2.CAP_PROP_FPS), cap.get(cv2.CAP_PROP_FRAME_COUNT)
     dur = nfr / fps if fps > 0 and nfr > 0 else None
-    last, n_repeat = None, 0
+    last, n_repeat, n_ffmpeg, use_cv2 = None, 0, 0, True
     for r in segs:
         out = frames_dir(r)
         os.makedirs(out, exist_ok=True)
         for i, t in enumerate(seg_times(r['start'], r['end'])):
             if dur:
                 t = min(t, dur - 0.1)
-            cap.set(cv2.CAP_PROP_POS_MSEC, max(t, 0) * 1000)
-            ok, fr = cap.read()
-            if not ok:                              # quá cuối video / lỗi giải mã: lặp frame trước
+            fr = None
+            if use_cv2:
+                cap.set(cv2.CAP_PROP_POS_MSEC, max(t, 0) * 1000)
+                ok, fr = cap.read()
+                fr = fr if ok else None
+            if fr is None:                          # cv2 không giải mã được (vd. codec AV1) hoặc seek lỗi: thử ffmpeg
+                fr = ffmpeg_frame(path, t)
+                if fr is not None:
+                    n_ffmpeg += 1
+                    use_cv2 = use_cv2 and last is not None   # cv2 chưa đọc được frame nào: cả video dùng ffmpeg
+            if fr is None:                          # quá cuối video: lặp frame trước
                 fr, n_repeat = last, n_repeat + 1
             if fr is None:
                 raise RuntimeError(f'no frame at {t:.1f}s')
@@ -460,7 +479,8 @@ def extract_video(path, ds, vid, segs, save=True):
     shutil.copy(tmp, f'{BASE}/cache/frames/{ds}/{vid}.tar')
     os.remove(tmp)
     write_json(f'{BASE}/cache/info/{ds}/{vid}.json', {'segments': len(segs), 'repeated_frames': n_repeat,
-                                                      'duration_cv2': dur, 'audio': has_audio, 'ffmpeg_err': res.stderr[-300:]})
+                                                      'duration_cv2': dur, 'audio': has_audio, 'ffmpeg_frames': n_ffmpeg,
+                                                      'ffmpeg_err': res.stderr[-300:]})
     mark_video_done(ds, vid)
 
 def process(path, ds, vid, src):
@@ -548,6 +568,14 @@ BY_VID = defaultdict(list)
 for r in EX_ROWS:
     BY_VID[(r['dataset'], r['video_id'])].append(r)
 VAL_BY_TAR = {t: sorted(v for v in VAL_VIDS if VIDX[v]['tar_path'] == t) for t in EXTRACT_TARS}
+
+if RUN_EXTRACT and RETRY_FAILED:
+    fr_rows = failed_rows()
+    retry = [x for x in fr_rows if (x['dataset'], x['video_id']) in BY_VID]
+    write_failed([x for x in fr_rows if x not in retry])
+    for t in {x['tar_path'] for x in retry} & set(EXTRACT_TARS):
+        set_tar(t, status='pending', error=None)      # tar done -> làm lại, chỉ các video chưa có trong videos_done
+    print(f'RETRY_FAILED: thử lại {len(retry)} video', Counter(x['error'][:40] for x in retry).most_common(5))
 
 if RUN_EXTRACT:
     print('--- ô 3 bắt đầu'); progress_report()
