@@ -69,17 +69,17 @@ N_BOOT     = 1000
 
 RUN_EXTRACT    = True
 RUN_ASR        = False    # 841/841 video đã có ASR trên Drive (2026-10-28); False: ô 4 chỉ đọc lại
-RUN_SPEED      = True
-RUN_DEV_GRID   = True
-RUN_YC2_VAL    = False    # chỉ bật sau khi đã điền PROTOCOL_SHA256
-RUN_HTSTEP_VAL = False
-RUN_EVAL       = False
-RUN_JUDGE      = False
+RUN_SPEED      = False    # phiên 1 xong (results/speed.json)
+RUN_DEV_GRID   = False    # protocol đã khóa 2026-10-28: q3b P1
+RUN_YC2_VAL    = True     # chỉ bật sau khi đã điền PROTOCOL_SHA256
+RUN_HTSTEP_VAL = True
+RUN_EVAL       = True
+RUN_JUDGE      = True
 RETRY_FAILED   = False    # ô 3: xóa video YC2/HT-Step val khỏi failed.csv, đưa tar của chúng về pending rồi làm lại
 RUN_FULL_PASS  = False    # ô 8b: HT-Step ngoài tar val (train). Cổng: protocol khóa + caption HT-Step val xong + T4, T6 đã tính
 FORCE_FULL_PASS = False   # True: chạy ô 8b dù T4/T6 trượt
 MAX_TARS_THIS_SESSION = None   # số tar 'full' tối đa mỗi session (None = không giới hạn)
-PROTOCOL_SHA256 = ''      # dán sha256 mà ô 6 in ra
+PROTOCOL_SHA256 = '06b1a54d32e34ddf22af5a84dbc41f51be3a23f9dfcfde469bd19c1e35cf4b94'   # ô 6, 2026-10-28
 
 GEN_MODELS   = {'q7b4': ('Qwen/Qwen2.5-VL-7B-Instruct', True),    # 4-bit NF4, fp16 compute
                 'q3b':  ('Qwen/Qwen2.5-VL-3B-Instruct', False)}   # fp16

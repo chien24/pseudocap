@@ -273,3 +273,19 @@ Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pse
   cùng chuỗi đã token hóa như `-stdio`; điểm toàn tập vẫn từ stats cộng dồn. Vẫn giữ `ascii_text()`.
 - Lần 3: ô 6 treo > 11 phút sau `CHECK yc2_dev__q7b4__P2.jsonl complete OK`, trước khi nạp q3b (chưa rõ vì sao; nghi 2 tiến trình
   Java METEOR `-Xmx2G` của 2 lần lỗi trước còn sống chiếm RAM). Sửa: ô 6 không nạp model khi đủ 3 file dev grid của model đó.
+- Lần 4 (`783af2a`, tiến trình Java cũ đã `pkill`): chấm xong. METEOR chế độ file chạy được. Số hyp bị `ascii_text` đổi: q7b4 P0/P1/P2
+  = 1/5/2, q3b = 0.
+
+| model | var | BLEU4 | METEOR | ROUGE_L | CIDEr | fb | seg/h |
+|---|---|---|---|---|---|---|---|
+| q7b4 | P0 | 11.88 | 17.97 | 37.39 | 120.30 | 0 | 1966 |
+| q7b4 | P1 | 17.56 | 22.76 | 43.58 | 169.20 | 0 | 1966 |
+| q7b4 | P2 | 18.07 | 22.28 | 43.82 | 177.10 | 0 | 1966 |
+| q3b | P0 | 11.45 | 16.83 | 38.12 | 142.31 | 0 | 2956 |
+| q3b | P1 | 18.28 | 21.99 | 44.92 | 203.13 | 0 | 2956 |
+| q3b | P2 | 18.76 | 22.18 | 45.36 | 195.15 | 0 | 2956 |
+
+- **Protocol khóa: q3b P1** (CIDEr 203.13; không cấu hình nào trong 1 điểm). sha256
+  `06b1a54d32e34ddf22af5a84dbc41f51be3a23f9dfcfde469bd19c1e35cf4b94`. Ô 0 đã điền sha + cờ phiên 2.
+- Ghi chú: CIDEr ở đây là 1 tham chiếu/segment, IDF tính trên 773 câu dev → giá trị tuyệt đối không so được với bài báo, chỉ so giữa
+  các cấu hình. ASR giúp rõ (P0 → P1: +60,8 với q3b, +48,9 với q7b4); few-shot không giúp thêm với q3b.
