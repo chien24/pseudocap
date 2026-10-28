@@ -219,3 +219,14 @@ Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pse
   lấy bằng ffmpeg nằm ở `cache/info/htstep/<vid>.json`, chưa xem). Codec thật vẫn chưa kiểm.
 - Giải nén frame về `/content`: 841 video trong 12:03 (1,29 s/video). Segment có frame: yc2/dev 773, yc2/val 3030, htstep/val 2195
   (khớp manifest). `CHECK every video done or logged as failed OK`, `CHECK frames ready OK`.
+
+## 2026-10-28: ô 4 (ASR), phiên 1
+
+- Lỗi 1: `av.open() got an unexpected keyword argument 'metadata_errors'` (PyAV trên Colab mới hơn bản faster-whisper 1.1.1
+  dùng). Sửa: `load_audio` giải mã bằng ffmpeg (mono 16 kHz s16 / 32768, như `decode_audio`), đưa mảng vào `transcribe`. `ac1f7e6`.
+- Lỗi 2: `libcublas.so.12 is not found`. Colab: **torch CUDA 13.0**; ctranslate2 (bản mới nhất 4.8.4) vẫn build cho CUDA 12, cuDNN
+  không bắt buộc từ 4.6.3. Sửa: `cuda12_cublas()` cài `nvidia-cublas-cu12` và nạp sẵn `libcublasLt.so.12`, `libcublas.so.12`
+  bằng `RTLD_GLOBAL`; `load_asr` gọi hàm này (ô 8b dùng chung). `804f716`.
+- Kết quả: `large-v3-turbo`, 841/841 video trong 2:12:15 (8,13 s/video), audio 290.054 s (80,6 h), **36,6x realtime**, VRAM cả GPU
+  khi chạy ASR **4,96 GB**. Ngôn ngữ tự nhận: en 788, es 33, de 4, tl 3, fr 2, nl 2, ja 2, el 1 (53 video ngoài en, chưa kiểm đúng
+  sai). 9 video không có từ nào. `CHECK asr for every ready video OK 841/841`, `CHECK one ASR model for all OK`.
