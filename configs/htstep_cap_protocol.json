@@ -1,0 +1,344 @@
+{
+ "created_utc": "2026-10-28T16:40:33Z",
+ "seed": 0,
+ "gen": {
+  "code": "q3b",
+  "repo": "Qwen/Qwen2.5-VL-3B-Instruct",
+  "revision": "66285546d2b821cf421d4f5eb2576359d3770cd3",
+  "nf4_4bit": false,
+  "dtype": "float16",
+  "attn_implementation": "sdpa",
+  "variant": "P1",
+  "decode": {
+   "do_sample": false,
+   "max_new_tokens": 40,
+   "temperature": null,
+   "top_p": null,
+   "top_k": null
+  }
+ },
+ "prompt": {
+  "system": "You are an annotator for a YouCook2-style dataset of cooking procedures. Write exactly one English sentence in the imperative mood, all lowercase, with no final period, about 8 words and at most 14 words, describing what happens in this clip. Mention only actions, ingredients and tools that are visible in the frames or spoken in the transcript. Do not guess and do not add details. Return only that sentence.",
+  "variants": {
+   "P0": [
+    "frames",
+    "task"
+   ],
+   "P1": [
+    "frames",
+    "task",
+    "asr"
+   ],
+   "P2": [
+    "frames",
+    "task",
+    "asr",
+    "fewshot"
+   ]
+  },
+  "anchor": "HT-Step only",
+  "n_frames": 8,
+  "asr_pad_s": 3.0,
+  "asr_max_words": 120,
+  "source": "You are an annotator for a YouCook2-style dataset of cooking procedures. Write exactly one English sentence in the imperative mood, all lowercase, with no final period, about 8 words and at most 14 words, describing what happens in this clip. Mention only actions, ingredients and tools that are visible in the frames or spoken in the transcript. Do not guess and do not add details. Return only that sentence.\ndef build_prompt(seg, variant, shorter=False):\n    parts = VARIANTS[variant] + (('anchor',) if seg['dataset'] == 'htstep' else ())\n    text = [f\"Dish: {seg['task']}.\"]\n    if 'asr' in parts:\n        text.append(f'Transcript around the clip: \"{asr_window(seg) or \"(no speech)\"}\"')\n    if 'fewshot' in parts:\n        text.append('Example captions from other videos (style only):\\n' + '\\n'.join(f\"- {s['sentence']}\" for s in FEWSHOT))\n    if 'anchor' in parts:\n        a = f\"The step being performed is: {seg['headline']}\"\n        if seg.get('description'):\n            a += f\" Step description: {seg['description']}\"\n        text.append(a + ' (This step text is for understanding only; do not mention anything from it that is not '\n                        'visible or spoken in the clip.)')\n    text.append('Write the caption for this clip.' + (f' Keep it short: at most {P90} words.' if shorter else ''))\n    content = ([{'type': 'video'}] if 'frames' in parts else []) + [{'type': 'text', 'text': '\\n'.join(text)}]\n    return [{'role': 'system', 'content': [{'type': 'text', 'text': SYSTEM}]}, {'role': 'user', 'content': content}]\n\ndef clean(txt):\n    line = next((l for l in txt.strip().splitlines() if l.strip()), '')\n    line = re.sub(r'[\"“”]', '', line).strip().rstrip('.').strip()\n    return line.lower()\n\ndef valid(c):\n    return bool(c) and len(c.split()) <= 2 * P90\n\ndef caption_one(gen, seg, variant):\n    raw = gen(seg, build_prompt(seg, variant))\n    c, src = clean(raw), 'model'\n    if not valid(c):\n        raw = gen(seg, build_prompt(seg, variant, shorter=True))\n        c, src = clean(raw), 'model_retry'\n    if not valid(c):\n        if seg['dataset'] == 'htstep':\n            c, src = clean(seg['headline']), 'headline_fallback'\n        else:                                       # YC2 không có headline: cắt về p90 từ\n            c, src = ' '.join(c.split()[:P90]), ('truncated' if c else 'empty')\n    return c, src, raw\n\ndef asr_window(r, max_words=ASR_MAX_WORDS):\n    \"\"\"Transcript các từ có tâm trong [start-3s, end+3s], tối đa max_words từ.\"\"\"\n    lo, hi = r['start'] - ASR_PAD, r['end'] + ASR_PAD\n    words = ' '.join(w for s, e, w in asr_words(r) if lo <= (s + e) / 2 <= hi).split()\n    return ' '.join(words[:max_words])\n"
+ },
+ "fewshot": [
+  {
+   "video_id": "XpZZ08wz_4A",
+   "seg_idx": 1,
+   "sentence": "place them under a hot broiler and cook them until the skin has charred"
+  },
+  {
+   "video_id": "aotPPzd8T_c",
+   "seg_idx": 2,
+   "sentence": "soak harusame noodles in warm water"
+  },
+  {
+   "video_id": "hcAM69dhawM",
+   "seg_idx": 2,
+   "sentence": "mix the pasta with the sauce"
+  },
+  {
+   "video_id": "y_gqHLza4Yk",
+   "seg_idx": 6,
+   "sentence": "add buttermilk to the bowl"
+  },
+  {
+   "video_id": "9X5xmrZMX30",
+   "seg_idx": 8,
+   "sentence": "cut the tofu in half and then into quarter inch slices"
+  },
+  {
+   "video_id": "aMtZQgH_MRc",
+   "seg_idx": 1,
+   "sentence": "cut the salmon fillet in half"
+  },
+  {
+   "video_id": "Ay55c3jSbeI",
+   "seg_idx": 1,
+   "sentence": "pour the marinade onto to the chicken"
+  },
+  {
+   "video_id": "Hu1-l8xvJjU",
+   "seg_idx": 3,
+   "sentence": "add minced garlic and salt"
+  }
+ ],
+ "yc2_stats": {
+  "source": "metadata/yc2_train_text.jsonl (YC2 subset 'training' minus dev, 1229 videos)",
+  "n_captions": 9564,
+  "words": {
+   "median": 8,
+   "p10": 5,
+   "p90": 14,
+   "min": 2,
+   "max": 43,
+   "mean": 8.81
+  },
+  "lowercase_rate": 1.0,
+  "trailing_period_rate": 0.0,
+  "top30_first_words": [
+   [
+    "add",
+    3147
+   ],
+   [
+    "place",
+    529
+   ],
+   [
+    "mix",
+    416
+   ],
+   [
+    "cut",
+    378
+   ],
+   [
+    "pour",
+    336
+   ],
+   [
+    "put",
+    284
+   ],
+   [
+    "cook",
+    245
+   ],
+   [
+    "heat",
+    230
+   ],
+   [
+    "chop",
+    200
+   ],
+   [
+    "spread",
+    194
+   ],
+   [
+    "fry",
+    172
+   ],
+   [
+    "remove",
+    158
+   ],
+   [
+    "slice",
+    153
+   ],
+   [
+    "take",
+    139
+   ],
+   [
+    "boil",
+    120
+   ],
+   [
+    "cover",
+    102
+   ],
+   [
+    "coat",
+    101
+   ],
+   [
+    "season",
+    101
+   ],
+   [
+    "stir",
+    98
+   ],
+   [
+    "drain",
+    93
+   ],
+   [
+    "flip",
+    91
+   ],
+   [
+    "roll",
+    88
+   ],
+   [
+    "sprinkle",
+    83
+   ],
+   [
+    "peel",
+    80
+   ],
+   [
+    "combine",
+    77
+   ],
+   [
+    "transfer",
+    67
+   ],
+   [
+    "blend",
+    59
+   ],
+   [
+    "bake",
+    57
+   ],
+   [
+    "dip",
+    57
+   ],
+   [
+    "mash",
+    51
+   ]
+  ]
+ },
+ "criteria": {
+  "T1_judge_pass_gt": 0.85,
+  "T1_judge_catch_corrupt": 0.7,
+  "T2_cider_pseudo_minus_asr_lo": 0.0,
+  "T3_r1_pseudo_over_gt": 0.9,
+  "T4_step_acc1": 0.85,
+  "T5_r1_pseudo_minus_headline_lo": 0.0,
+  "T6_unsupported_max": 0.2,
+  "T7_fallback_max": 0.05
+ },
+ "asr_model": "large-v3-turbo",
+ "eval_models": {
+  "judge": [
+   "OpenGVLab/InternVL3-8B-hf",
+   "259a3b64a14623c0ec91a045cb43f7c5af5fa6af"
+  ],
+  "vision": [
+   "google/siglip-so400m-patch14-384",
+   "9fdffc58afc957d1a03a25b10dba0329ab15c2a3"
+  ],
+  "text": [
+   "sentence-transformers/all-mpnet-base-v2",
+   "e8c3b32edf5434bc2275fc9bab85f82640a19130"
+  ],
+  "bertscore": "roberta-large (bert-score default layer, no baseline rescale)"
+ },
+ "selection": {
+  "rule": "max CIDEr trên YC2 dev; hòa (chênh < 1 điểm) -> model nhanh hơn",
+  "dev_table": [
+   {
+    "model": "q7b4",
+    "variant": "P0",
+    "BLEU4": 11.88,
+    "METEOR": 17.97,
+    "ROUGE_L": 37.39,
+    "CIDEr": 120.3,
+    "fallback_or_trunc": 0,
+    "seg_per_h": 1966
+   },
+   {
+    "model": "q7b4",
+    "variant": "P1",
+    "BLEU4": 17.56,
+    "METEOR": 22.76,
+    "ROUGE_L": 43.58,
+    "CIDEr": 169.2,
+    "fallback_or_trunc": 0,
+    "seg_per_h": 1966
+   },
+   {
+    "model": "q7b4",
+    "variant": "P2",
+    "BLEU4": 18.07,
+    "METEOR": 22.28,
+    "ROUGE_L": 43.82,
+    "CIDEr": 177.1,
+    "fallback_or_trunc": 0,
+    "seg_per_h": 1966
+   },
+   {
+    "model": "q3b",
+    "variant": "P0",
+    "BLEU4": 11.45,
+    "METEOR": 16.83,
+    "ROUGE_L": 38.12,
+    "CIDEr": 142.31,
+    "fallback_or_trunc": 0,
+    "seg_per_h": 2956
+   },
+   {
+    "model": "q3b",
+    "variant": "P1",
+    "BLEU4": 18.28,
+    "METEOR": 21.99,
+    "ROUGE_L": 44.92,
+    "CIDEr": 203.13,
+    "fallback_or_trunc": 0,
+    "seg_per_h": 2956
+   },
+   {
+    "model": "q3b",
+    "variant": "P2",
+    "BLEU4": 18.76,
+    "METEOR": 22.18,
+    "ROUGE_L": 45.36,
+    "CIDEr": 195.15,
+    "fallback_or_trunc": 0,
+    "seg_per_h": 2956
+   }
+  ],
+  "speed": {
+   "q7b4": {
+    "seg_per_h_P2": 1966,
+    "model_ok": 20,
+    "peak_vram_gb": 7.73
+   },
+   "q3b": {
+    "seg_per_h_P2": 2956,
+    "model_ok": 20,
+    "peak_vram_gb": 7.38
+   }
+  }
+ },
+ "n_boot": 1000,
+ "judge_n": [
+  300,
+  300,
+  600
+ ],
+ "metadata_sha256": {
+  "manifest.jsonl": "bfb28391816e3f3430e98219ebcfa86d1698007b4cfc7d40814823b7b6c99362",
+  "manifest_htstep_train.jsonl.gz": "2fcc56e30aece99e58c954b04c9e1a6a9141ab084009ee232fefb220f22ada0e",
+  "yc2_train_text.jsonl": "ce42f78acbe29fcf53d8198492f900a62ef6078eb6950a66d2c7eae61614120f",
+  "yc2_dev_val_split.json": "f0d5d2f7d45f0794cffbb39b8a1f0240c1c9f7d0e6e196cab6af6f07316e522d",
+  "availability.csv": "f86ddcc62063c2a3b50a31a3bcdb552aec08605cfbf73d1cf8cbd255301736a4",
+  "tar_index.csv": "6865b0772402ef2aba945d8b2b919383272d8d5bfd317eea38fd641c03ff7853",
+  "tar_index_tars.json": "35934323f1f43572fc73bfec3852917de207857470f20868931f97b4d13f4b3a",
+  "tar_order.txt": "c56e569b89f9e46c2d4d9b9d977a094f8b0e3cfec90162ece42248dea0286533",
+  "yc2_stats.json": "0e90590cac8c2014ce8fc48cb54302636540cc2246bdfb5114a5a283251e056b"
+ },
+ "pseudocap_commit": "f18b2107ed50df1765dc00a67caf30f78701ca5c"
+}
