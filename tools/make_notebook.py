@@ -873,8 +873,20 @@ from pycocoevalcap.meteor.meteor import Meteor
 from pycocoevalcap.rouge.rouge import Rouge
 from pycocoevalcap.cider.cider import Cider
 
+def ascii_text(s):
+    """Chỉ giữ ASCII in được, bỏ '|'. METEOR jar (-stdio) đọc mỗi dòng stdin là một lệnh: ký tự ngoài ASCII (Java giải mã
+    lệch -> U+0085/U+2028 là xuống dòng) hoặc '|||' tách một lệnh thành hai -> lệch dòng đọc (ValueError ở ô 6, 2026-10-28)."""
+    return ' '.join(re.sub(r'[^\x20-\x7e]', '', ' '.join(s.split()).replace('|', ' ')).split())   # split(): mọi kiểu xuống dòng
+
+assert ascii_text('add\u2028salt | pepper\x85 jalape\xf1o\r\n') == 'add salt pepper jalapeo'
+
 def coco(refs, hyps):
     """refs/hyps {key: str} -> (điểm toàn tập, {metric: {key: điểm}}). BLEU-4 chỉ báo toàn tập."""
+    n_non_ascii = sum(ascii_text(h or '') != ' '.join((h or '').split()) for h in hyps.values())
+    if n_non_ascii:
+        print(f'coco: {n_non_ascii}/{len(hyps)} hyp có ký tự ngoài ASCII hoặc "|" (đã bỏ trước khi chấm)')
+    refs = {k: ascii_text(refs[k]) for k in hyps}
+    hyps = {k: ascii_text(v or '') for k, v in hyps.items()}
     tok = PTBTokenizer()
     g = tok.tokenize({k: [{'caption': refs[k]}] for k in hyps})
     h = tok.tokenize({k: [{'caption': hyps[k] or 'none'}] for k in hyps})

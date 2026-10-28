@@ -253,3 +253,14 @@ Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pse
   seg/h, 8,44 GB). Ước lượng giờ: q7b4 dev grid 1,1 / YC2 val 1,4 / HT-Step val 1,0; q3b 0,8 / 1,0 / 0,8.
 - Lượt full: ASR 21,4 + caption q7b4 20,9 hoặc q3b 15,1 giờ GPU. ASR (4,96) + model sinh (≤ 7,73) + 1 < 14,6 GB → ô 8b sẽ giữ cả
   hai trên GPU.
+
+## 2026-10-28: ô 6 lỗi METEOR
+
+- Lưới dev chạy đủ: 6 file `captions/dev_grid/yc2_dev__{q7b4,q3b}__{P0,P1,P2}.jsonl` đều 773/773 (q7b4 P2 2,12 s/seg; q3b P0/P1/P2
+  1,13 / 1,21 / 1,30 s/seg). Protocol **chưa ghi**.
+- Lỗi khi chấm q7b4 P0: BLEU xong, `Meteor.compute_score` đọc phải một dòng stats (`'9.0 7.0 4.0 ...'`) chỗ cần một số → `ValueError`.
+  pycocoevalcap 1.2 gửi mỗi segment một lệnh `SCORE` (đọc 1 dòng) rồi một lệnh `EVAL` (đọc N+1 dòng); dòng thừa nghĩa là một lệnh
+  `SCORE` bị jar tách thành hai dòng. GT YC2 dev toàn ASCII (đã quét 773 câu ở local), nên lỗi nằm ở caption sinh ra.
+  **[giả thuyết]** caption có ký tự ngoài ASCII (Java giải mã thành ký tự xuống dòng như U+0085) hoặc `|`.
+- Sửa: `ascii_text()` (bỏ ký tự ngoài ASCII, đổi `|` và mọi kiểu xuống dòng thành dấu cách), áp cho cả refs và hyps trước
+  PTBTokenizer trong `coco()` (dùng cho ô 6 và 9a, cùng một cách cho mọi hệ). `coco()` in số hyp bị đổi.
