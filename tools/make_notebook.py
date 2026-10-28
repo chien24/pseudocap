@@ -927,9 +927,13 @@ if RUN_DEV_GRID:
         if not (REV[code] and SPEED.get(code)):
             print('bỏ', code, '(không tải được ở ô 5)')
             continue
+        paths = {v: f'{BASE}/captions/dev_grid/yc2_dev__{code}__{v}.jsonl' for v in VARIANTS}
+        if all({r['key'] for r in read_jsonl(pv)} >= set(DEV_REFS) for pv in paths.values()):
+            print(code, ': dev grid đã đủ 3 biến thể, không nạp model')
+            continue
         model, gen = load_gen(code, REV[code])
-        for v in VARIANTS:
-            caption_rows(DEV, f'{BASE}/captions/dev_grid/yc2_dev__{code}__{v}.jsonl', gen, v, {'model': code})
+        for v, pv in paths.items():
+            caption_rows(DEV, pv, gen, v, {'model': code})
         model = gen = None
         free()
 

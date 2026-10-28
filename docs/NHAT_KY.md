@@ -271,3 +271,5 @@ Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pse
 - Sửa: `meteor_files()` gọi cùng jar ở **chế độ file** (`java -Xmx2G -jar meteor-1.5.jar hyp.txt ref.txt -l en -norm`, cwd = thư
   mục jar), đọc điểm từng segment + điểm toàn tập; lỗi (rc ≠ 0, thiếu segment) thì raise kèm stdout/stderr. Cùng jar, cùng tham số,
   cùng chuỗi đã token hóa như `-stdio`; điểm toàn tập vẫn từ stats cộng dồn. Vẫn giữ `ascii_text()`.
+- Lần 3: ô 6 treo > 11 phút sau `CHECK yc2_dev__q7b4__P2.jsonl complete OK`, trước khi nạp q3b (chưa rõ vì sao; nghi 2 tiến trình
+  Java METEOR `-Xmx2G` của 2 lần lỗi trước còn sống chiếm RAM). Sửa: ô 6 không nạp model khi đủ 3 file dev grid của model đó.
