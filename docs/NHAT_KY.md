@@ -241,3 +241,15 @@ Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pse
 - Sửa: ô 2 ghim `bitsandbytes==0.50.2` (wheel có `libbitsandbytes_cuda130.so`, đã đọc danh sách file trong wheel bằng range
   request); ô 2b thêm `CHECK bitsandbytes has a binary for torch CUDA`. Chưa kiểm trên Colab: bnb 0.50.2 với transformers 4.53.3,
   bản cuda130 chạy trên T4 (sm_75).
+
+## 2026-10-28: ô 2b + ô 5 sau khi sửa (phiên 1b, notebook `a2693f0`)
+
+- Môi trường: torch 2.11.0+cu130, transformers 4.53.3, bitsandbytes 0.50.2, faster-whisper 1.1.1, ctranslate2 4.8.4,
+  opencv-python 5.0.0.93, GPU Tesla T4 14,6 GB. `CHECK bitsandbytes has a binary for torch CUDA OK libbitsandbytes_cuda130.so`.
+- Revision: q7b4 `cc594898137f460bfe9f0759e9844b3ce807cfb5`, q3b `66285546d2b821cf421d4f5eb2576359d3770cd3`, judge
+  InternVL3-8B-hf `259a3b64a14623c0ec91a045cb43f7c5af5fa6af`, SigLIP `9fdffc58afc957d1a03a25b10dba0329ab15c2a3`, mpnet
+  `e8c3b32edf5434bc2275fc9bab85f82640a19130`.
+- Tốc độ (P2, 20 segment YC2 dev): q7b4 2094 seg/h, 20/20, VRAM đỉnh 7,73 GB; q3b 2895 seg/h, 20/20, 7,38 GB (lần đo trước 2640
+  seg/h, 8,44 GB). Ước lượng giờ: q7b4 dev grid 1,1 / YC2 val 1,4 / HT-Step val 1,0; q3b 0,8 / 1,0 / 0,8.
+- Lượt full: ASR 21,4 + caption q7b4 20,9 hoặc q3b 15,1 giờ GPU. ASR (4,96) + model sinh (≤ 7,73) + 1 < 14,6 GB → ô 8b sẽ giữ cả
+  hai trên GPU.
