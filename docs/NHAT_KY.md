@@ -264,3 +264,10 @@ Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pse
   **[giả thuyết]** caption có ký tự ngoài ASCII (Java giải mã thành ký tự xuống dòng như U+0085) hoặc `|`.
 - Sửa: `ascii_text()` (bỏ ký tự ngoài ASCII, đổi `|` và mọi kiểu xuống dòng thành dấu cách), áp cho cả refs và hyps trước
   PTBTokenizer trong `coco()` (dùng cho ô 6 và 9a, cùng một cách cho mọi hệ). `coco()` in số hyp bị đổi.
+- Lần 2 (sau `2d24180`): `coco: 1/773 hyp có ký tự ngoài ASCII` nhưng vẫn lỗi y hệt (cùng dòng stats `'9.0 7.0 4.0 ...'`) →
+  giả thuyết ký tự ngoài ASCII **sai** (hoặc không đủ). Không chạy được jar ở local để tìm nguyên nhân (bị chặn chạy code tải về).
+  Đọc hằng chuỗi trong `meteor-1.5.jar`: jar tách trường bằng regex `\|\|\|`, có chế độ file in `Segment <i> score:` và
+  `Final score:`.
+- Sửa: `meteor_files()` gọi cùng jar ở **chế độ file** (`java -Xmx2G -jar meteor-1.5.jar hyp.txt ref.txt -l en -norm`, cwd = thư
+  mục jar), đọc điểm từng segment + điểm toàn tập; lỗi (rc ≠ 0, thiếu segment) thì raise kèm stdout/stderr. Cùng jar, cùng tham số,
+  cùng chuỗi đã token hóa như `-stdio`; điểm toàn tập vẫn từ stats cộng dồn. Vẫn giữ `ascii_text()`.

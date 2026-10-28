@@ -874,11 +874,28 @@ from pycocoevalcap.rouge.rouge import Rouge
 from pycocoevalcap.cider.cider import Cider
 
 def ascii_text(s):
-    """Chỉ giữ ASCII in được, bỏ '|'. METEOR jar (-stdio) đọc mỗi dòng stdin là một lệnh: ký tự ngoài ASCII (Java giải mã
-    lệch -> U+0085/U+2028 là xuống dòng) hoặc '|||' tách một lệnh thành hai -> lệch dòng đọc (ValueError ở ô 6, 2026-10-28)."""
+    """Chỉ giữ ASCII in được, bỏ '|' (jar METEOR tách trường theo '|||'), một dòng; cùng một cách cho refs và mọi hệ."""
     return ' '.join(re.sub(r'[^\x20-\x7e]', '', ' '.join(s.split()).replace('|', ' ')).split())   # split(): mọi kiểu xuống dòng
 
 assert ascii_text('add\u2028salt | pepper\x85 jalape\xf1o\r\n') == 'add salt pepper jalapeo'
+
+def meteor_files(g, h, keys):
+    """METEOR bằng đúng jar của pycocoevalcap (meteor-1.5, -l en -norm) nhưng ở chế độ file thay cho -stdio: trên Colab
+    (2026-10-28) Meteor.compute_score lệch dòng đọc (đọc phải dòng stats khi chờ điểm) dù input đã là ASCII một dòng."""
+    import tempfile
+    jar_dir = os.path.dirname(inspect.getfile(Meteor))
+    with tempfile.TemporaryDirectory() as d:
+        for name, src in (('hyp', h), ('ref', g)):
+            with open(f'{d}/{name}.txt', 'w', encoding='utf-8') as f:
+                f.write(''.join(src[k][0] + '\n' for k in keys))
+        r = subprocess.run(['java', '-Xmx2G', '-jar', 'meteor-1.5.jar', f'{d}/hyp.txt', f'{d}/ref.txt', '-l', 'en', '-norm'],
+                           cwd=jar_dir, capture_output=True, text=True)
+    seg = sorted((int(i), float(x)) for i, x in re.findall(r'^Segment (\d+) score:\s*(\S+)', r.stdout, re.M))
+    final = re.findall(r'^Final score:\s*(\S+)', r.stdout, re.M)
+    if r.returncode or not final or [i for i, _ in seg] != list(range(1, len(keys) + 1)):
+        raise RuntimeError(f'METEOR file mode: rc={r.returncode}, {len(seg)}/{len(keys)} segment\n'
+                           f'{r.stdout[:1500]}\n{r.stderr[-1500:]}')
+    return float(final[0]), [x for _, x in seg]
 
 def coco(refs, hyps):
     """refs/hyps {key: str} -> (điểm toàn tập, {metric: {key: điểm}}). BLEU-4 chỉ báo toàn tập."""
@@ -895,7 +912,9 @@ def coco(refs, hyps):
     h = {k: h[k] for k in keys}
     b, _ = Bleu(4).compute_score(g, h)
     out, per = {'BLEU4': b[3]}, {}
-    for name, sc in [('METEOR', Meteor()), ('ROUGE_L', Rouge()), ('CIDEr', Cider())]:
+    out['METEOR'], arr = meteor_files(g, h, keys)
+    per['METEOR'] = dict(zip(keys, arr))
+    for name, sc in [('ROUGE_L', Rouge()), ('CIDEr', Cider())]:
         s, arr = sc.compute_score(g, h)
         out[name], per[name] = float(s), dict(zip(keys, map(float, arr)))
     return out, per
