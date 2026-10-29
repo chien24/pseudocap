@@ -1486,6 +1486,7 @@ if RUN_JUDGE:
                                                        llm_int8_skip_modules=['vision_tower', 'multi_modal_projector', 'lm_head'])
     jm = AutoModelForImageTextToText.from_pretrained(JUDGE, **kw).eval()
     jp = AutoProcessor.from_pretrained(JUDGE, revision=JUDGE_REV)
+    jm.generation_config.pad_token_id = jp.tokenizer.eos_token_id   # như mặc định của generate, chỉ để khỏi in cảnh báo mỗi segment
 
     @torch.inference_mode()
     def judge(r, cap):

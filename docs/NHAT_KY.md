@@ -289,3 +289,21 @@ Không sửa file plan (`Data/Htstep/HTSTEP_PSEUDO_CAPTION.md` nằm ngoài `pse
   `06b1a54d32e34ddf22af5a84dbc41f51be3a23f9dfcfde469bd19c1e35cf4b94`. Ô 0 đã điền sha + cờ phiên 2.
 - Ghi chú: CIDEr ở đây là 1 tham chiếu/segment, IDF tính trên 773 câu dev → giá trị tuyệt đối không so được với bài báo, chỉ so giữa
   các cấu hình. ASR giúp rõ (P0 → P1: +60,8 với q3b, +48,9 với q7b4); few-shot không giúp thêm với q3b.
+
+## 2026-10-29: phiên 2 (ô 7 → 9e, mất kết nối giữa 9e)
+
+- Ô 7, 8: mọi `verify_protocol` CHECK OK. YC2 val 3030/3030, HT-Step val 2195/2195 (`model` 2189, `model_retry` 6, fallback 0).
+- 5.1 (YC2 val, n=3030): pseudo BLEU4 14.24, METEOR 22.72 [22.04, 23.46], ROUGE_L 42.07, CIDEr 169.09 [160.73, 177.36], BERTScore
+  90.33; ASR-as-caption CIDEr 28.95; xáo trong video CIDEr 30.07. **CIDEr pseudo − ASR = 140.14 [131.65, 148.61]**.
+- 5.2 (HT-Step val, n=2195): **acc@1 pseudo 65.56 [62.96, 68.15]**, ASR 30.39, ngẫu nhiên 9.99. Nhiều ca sai là bước liền kề /
+  hành động thấy trong clip khác nhãn bước (vd 'place a layer of paper towels over the bacon strips' → chọn bước 'Lay ... bacon
+  strips across the paper towels').
+- 5.3 R@1 trong video: YC2 pseudo 60.56 vs GT 63.33 (hiệu −2.77 [−4.55, −1.05]); HT-Step pseudo 63.44 vs headline 55.87
+  (**hiệu +7.57 [5.49, 9.91]**), ASR 44.86.
+- 5.4a có ≥ 1 danh từ không căn cứ: YC2 pseudo 26.67%, YC2 GT 42.81%, HT-Step pseudo 10.98% (chỉ số thô; GT cao hơn pseudo).
+- 5.4b: cal_gt 300/300, cal_corrupt 273/273 xong; yc2_val_pseudo ~200/300 thì mất kết nối; htstep_val_pseudo chưa chạy. Ô 10, 11
+  chưa chạy.
+- Đối chiếu tiêu chí (tạm, ô 10 chưa chạy): T2 đạt, T3 đạt (60.56 ≥ 0.9 × 63.33 = 57.0), **T4 trượt rõ** (cận trên 68.15 < 85),
+  T5 đạt, T7 đạt (0%), T1/T6 chờ 9e. T4 trượt → cổng ô 8b chặn lượt full trừ khi `FORCE_FULL_PASS`; theo mục 6, headline là cấu hình
+  chính. Ngưỡng nằm trong protocol đã khóa, không sửa.
+- Sửa nhỏ: ô 9e đặt `pad_token_id` của giám khảo = eos (giá trị generate vẫn tự dùng) để bỏ cảnh báo lặp mỗi segment.
