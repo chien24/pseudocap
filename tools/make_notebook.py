@@ -215,11 +215,16 @@ def load_frames(r):
 
 def restore_frames(rows):
     """Giải nén tar frame (Drive) của video đã xong về LOCAL, một lần mỗi phiên; trả về các segment có frame."""
-    for ds, vid in tqdm(sorted({(r['dataset'], r['video_id']) for r in rows}), desc='giải nén frame về /content'):
+    from concurrent.futures import ThreadPoolExecutor
+    def one(k):
+        ds, vid = k
         tar = f'{BASE}/cache/frames/{ds}/{vid}.tar'
         if not os.path.isdir(f'{LOCAL}/frames/{ds}/{vid}') and os.path.exists(tar):
             with tarfile.open(tar) as t:
                 t.extractall(f'{LOCAL}/frames/{ds}', filter='data')
+    vids = sorted({(r['dataset'], r['video_id']) for r in rows})
+    with ThreadPoolExecutor(8) as ex:                    # đọc Drive song song (mỗi video một thư mục riêng)
+        list(tqdm(ex.map(one, vids), total=len(vids), desc='giải nén frame về /content'))
     return [r for r in rows if has_frames(r)]
 
 _ASR = {}
@@ -703,8 +708,15 @@ if RUN_ASR:
     pipe = None
     free()
 
-asr = {k: json.load(open(f'{BASE}/asr/{k[0]}/{k[1]}.json', encoding='utf-8')) for k in READY_VIDS
-       if os.path.exists(f'{BASE}/asr/{k[0]}/{k[1]}.json')}
+def read_asr(k):
+    p = f'{BASE}/asr/{k[0]}/{k[1]}.json'
+    return k, (json.load(open(p, encoding='utf-8')) if os.path.exists(p) else None)
+
+# Drive mount đọc từng file nhỏ chậm (~0,7 s/file ở phiên mới) -> đọc song song, có thanh tiến trình
+from concurrent.futures import ThreadPoolExecutor
+with ThreadPoolExecutor(16) as ex:
+    asr = {k: a for k, a in tqdm(ex.map(read_asr, READY_VIDS), total=len(READY_VIDS), desc='đọc ASR từ Drive') if a}
+_ASR.update({k: a['words'] for k, a in asr.items()})   # asr_words() (prompt, đánh giá) khỏi đọc lại Drive
 ASR_NAME = next(iter({a['model'] for a in asr.values()}), None)
 print('ASR model:', ASR_NAME, '| ngôn ngữ:', Counter(a['language'] for a in asr.values()).most_common(8))
 print('video không có từ nào:', sum(not a['words'] for a in asr.values()))
